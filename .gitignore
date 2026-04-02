@@ -1,0 +1,4 @@
+node_modules/
+*.db
+.pio/
+.vscode/

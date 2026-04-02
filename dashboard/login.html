@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - Inventory Sys</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: radial-gradient(circle at 10% 20%, rgb(14, 26, 64) 0%, rgb(0, 0, 0) 90%);
+        }
+
+        .login-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            padding: 40px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .login-card h2 {
+            margin-top: 0;
+            margin-bottom: 30px;
+            font-weight: 600;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            color: white;
+            border-radius: 8px;
+            font-size: 1rem;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+
+        .input-group input:focus {
+            border-color: var(--primary);
+            outline: none;
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 12px;
+            font-size: 1.1rem;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+
+        .forgot-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            display: inline-block;
+            margin-top: 20px;
+            cursor: pointer;
+            transition: color 0.3s;
+        }
+
+        .forgot-link:hover {
+            color: var(--primary);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-card">
+        <h2>Admin Authentication</h2>
+        <div class="input-group">
+            <label>Username</label>
+            <input type="text" id="username" placeholder="admin">
+        </div>
+        <div class="input-group">
+            <label>Password</label>
+            <input type="password" id="password" placeholder="••••••••">
+        </div>
+        <button class="btn-primary" onclick="login()">Access Dashboard</button>
+        <a class="forgot-link" onclick="forgotPassword()">Forgot Password?</a>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script>
+        const baseUrl = window.location.host === "" ? "http://localhost:3000" : "";
+
+        function showToast(message, type) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            const icon = type === 'alert' ? '⚠️' : 'ℹ️';
+            toast.innerHTML = `<span>${icon}</span> <div>${message}</div>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        async function login() {
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+
+            if (!u || !p) {
+                showToast('Please enter both username and password', 'alert');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${baseUrl}/api/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: u, password: p })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    localStorage.setItem('adminToken', data.token);
+                    window.location.href = '/';
+                } else {
+                    showToast('Invalid credentials', 'alert');
+                }
+            } catch (e) {
+                showToast('Connection error', 'alert');
+            }
+        }
+
+        function forgotPassword() {
+            const recoveryKey = prompt("PASSWORD RECOVERY\n\nPlease enter your 16-digit Emergency Recovery Key provided by IT Support.");
+
+            if (recoveryKey) {
+                if (recoveryKey.length >= 10) {
+                    showToast("Recovery key accepted. Admin password has been sent to your registered email.", "info");
+                } else {
+                    showToast("Invalid recovery key.", "alert");
+                }
+            }
+        }
+
+        document.getElementById('password').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') login();
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,492 @@
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const WebSocket = require('ws');
+const http = require('http');
+const db = require('./db');
+const path = require('path');
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+app.use(cors());
+app.use(bodyParser.json());
+
+// Serve the dashboard statically
+app.use(express.static(path.join(__dirname, '../dashboard')));
+
+// ==========================================
+// ADMIN AUTHENTICATION
+// ==========================================
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    // Hardcoded simple admin for prototype
+    if (username === 'admin' && password === 'admin') {
+        res.json({ token: 'admin_authenticated_token_' + Date.now() });
+    } else {
+        res.status(401).json({ error: 'Invalid credentials' });
+    }
+});
+
+// ==========================================
+// HARDWARE ENROLLMENT (From ESP32 Gate Reader)
+// ==========================================
+app.post('/api/enroll', (req, res) => {
+    const { uid, type } = req.body;
+    if (!uid || !type) return res.status(400).json({ error: "Missing uid or type" });
+
+    if (type === 'employee') {
+        db.run(`INSERT OR IGNORE INTO employees (uid, name) VALUES (?, ?)`,
+            [uid, 'New Employee (Edit via Dashboard)'], function (err) {
+                if (err) return res.status(500).json({ error: err.message });
+                broadcastUpdate({ type: 'alert', message: `🆕 New Employee Card enrolled from Gate: ${uid}`, severity: 'info' });
+                broadcastUpdate({ type: 'inventory_update' });
+                res.status(201).json({ message: "Employee enrolled", uid });
+            });
+    } else if (type === 'component') {
+        db.run(`INSERT OR IGNORE INTO components (uid, name, status) VALUES (?, ?, 'IN')`,
+            [uid, 'New Component (Edit via Dashboard)'], function (err) {
+                if (err) return res.status(500).json({ error: err.message });
+                broadcastUpdate({ type: 'alert', message: `🆕 New Component Tag enrolled from Gate: ${uid}`, severity: 'info' });
+                broadcastUpdate({ type: 'inventory_update' });
+                res.status(201).json({ message: "Component enrolled", uid });
+            });
+    } else {
+        res.status(400).json({ error: "Invalid type. Use 'employee' or 'component'." });
+    }
+});
+
+// ==========================================
+// WIFI CONFIG (OTA Provisioning for ESP32)
+// ==========================================
+let wifiConfig = { ssid: '', password: '' };
+
+app.get('/api/wifi-config', (req, res) => {
+    if (!wifiConfig.ssid) {
+        return res.status(404).json({ error: "No WiFi config set yet. Set it from the Dashboard." });
+    }
+    res.json(wifiConfig);
+});
+
+app.post('/api/wifi-config', (req, res) => {
+    const { ssid, password } = req.body;
+    if (!ssid) return res.status(400).json({ error: "SSID is required" });
+    wifiConfig = { ssid, password: password || '' };
+    broadcastUpdate({ type: 'alert', message: `📡 WiFi Config updated: ${ssid}. Devices will fetch on next sync.`, severity: 'info' });
+    res.json({ message: "WiFi config saved. ESP32 devices will pick it up automatically." });
+});
+
+// ==========================================
+// CONFIG & STATE (In-Memory for simplicity)
+// ==========================================
+let geofenceConfig = {
+    lat: 18.5204,
+    lng: 73.8567,
+    radius: 500, // meters
+    name: "Authorized Work Zone"
+};
+
+const activeTrackers = {}; // State for GPS smoothing
+
+// WebSocket connections
+wss.on('connection', (ws) => {
+    console.log('Dashboard client connected via WebSocket');
+    ws.send(JSON.stringify({ type: 'status', message: 'Connected to Live Tracking' }));
+    // Send current geofence config to new clients
+    ws.send(JSON.stringify({ type: 'geofence_config', ...geofenceConfig }));
+});
+
+function broadcastUpdate(data) {
+    wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(data));
+        }
+    });
+}
+
+// ==========================================
+// HELPER: Calculate distance between two GPS points (Haversine)
+// ==========================================
+function haversineDistance(lat1, lng1, lat2, lng2) {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in meters
+}
+
+// ==========================================
+// API ROUTES
+// ==========================================
+
+// 1. RFID GATE SCANNER (Check in / Check out)
+app.post('/api/transactions/scan', (req, res) => {
+    let { componentUid, employeeUid } = req.body;
+
+    if (!componentUid || !employeeUid) {
+        return res.status(400).json({ error: "Missing UIDs" });
+    }
+
+    console.log(`Gate Scan Received: ID1=${componentUid}, ID2=${employeeUid}`);
+
+    // ORDER AGNOSTIC LOOKUP (Find which is Component and which is Employee)
+    db.get(`SELECT uid FROM components WHERE uid = ? OR uid = ?`, [componentUid, employeeUid], (err, compRow) => {
+        if (err || !compRow) return res.status(404).json({ error: "No valid component tag scanned" });
+
+        db.get(`SELECT uid FROM employees WHERE uid = ? OR uid = ?`, [componentUid, employeeUid], (err, empRow) => {
+            if (err || !empRow) return res.status(404).json({ error: "No valid employee card scanned" });
+
+            const realCompUid = compRow.uid;
+            const realEmpUid = empRow.uid;
+
+            db.get(`SELECT * FROM components WHERE uid = ?`, [realCompUid], (err, comp) => {
+                db.get(`SELECT * FROM employees WHERE uid = ?`, [realEmpUid], (err, emp) => {
+
+                    let isCheckingOut = comp.status === 'IN';
+                    let newStatus = isCheckingOut ? 'OUT' : 'IN';
+                    let assignedTo = isCheckingOut ? emp.name : null;
+
+                    // --- ADMIN APPROVAL CHECK ---
+                    if (isCheckingOut && comp.approved_for_uid !== realEmpUid) {
+                        console.log(`❌ Access Denied: ${emp.name} tried to take ${comp.name} without approval!`);
+
+                        // Alert Dashboard of unauthorized attempt
+                        broadcastUpdate({
+                            type: 'alert',
+                            message: `⚠️ Unauthorized check-out attempt: ${emp.name} tried to take ${comp.name} without approval!`,
+                            severity: 'danger'
+                        });
+
+                        return res.status(403).json({ error: "Access Denied: Admin Approval Required" });
+                    }
+
+                    db.run(`UPDATE components SET status = ?, assigned_to = ?, approved_for_uid = NULL WHERE uid = ?`,
+                        [newStatus, assignedTo, realCompUid], function (err) {
+                            if (err) return res.status(500).json({ error: "Database error" });
+
+                            db.run(`INSERT INTO transactions (component_uid, employee_uid, action) VALUES (?, ?, ?)`,
+                                [realCompUid, realEmpUid, newStatus]);
+
+                            broadcastUpdate({
+                                type: 'inventory_update',
+                                component: comp.name,
+                                employee: emp.name,
+                                action: newStatus
+                            });
+
+                            res.status(200).json({ message: `Successfully checked ${newStatus}` });
+                        });
+                });
+            });
+        });
+    });
+});
+
+// 2. GPS TRACKER UPDATES (with geofence check)
+app.post('/api/tracking', (req, res) => {
+    const { trackerId, lat, lng } = req.body;
+
+    if (!trackerId || !lat || !lng) {
+        return res.status(400).json({ error: "Missing GPS data" });
+    }
+
+    console.log(`Raw GPS Update -> Tracker: ${trackerId} | Lat: ${lat}, Lng: ${lng}`);
+
+    // --- EXPERIMENTAL: GPS PRECISION FILTER (EMA Smoothing) ---
+    // The NEO-6M naturally jumps around. We apply an Exponential Moving Average
+    // to smooth the path and make the map look highly precise.
+    let finalLat = parseFloat(lat);
+    let finalLng = parseFloat(lng);
+
+    if (!activeTrackers[trackerId]) {
+        activeTrackers[trackerId] = { lat: finalLat, lng: finalLng };
+    } else {
+        const alpha = 0.4; // Smoothing factor (lower = smoother but more lag)
+        finalLat = (alpha * finalLat) + ((1 - alpha) * activeTrackers[trackerId].lat);
+        finalLng = (alpha * finalLng) + ((1 - alpha) * activeTrackers[trackerId].lng);
+
+        // Update state
+        activeTrackers[trackerId].lat = finalLat;
+        activeTrackers[trackerId].lng = finalLng;
+    }
+
+    console.log(`Smoothed GPS   -> Lat: ${finalLat.toFixed(6)}, Lng: ${finalLng.toFixed(6)}`);
+
+    // Log to DB (using the smoothed coordinates for cleaner history)
+    db.run(`INSERT INTO gps_logs (tracker_id, lat, lng) VALUES (?, ?, ?)`, [trackerId, finalLat, finalLng], (err) => {
+        if (err) console.error("Could not save GPS log:", err);
+    });
+
+    // Calculate distance from geofence center using smoothed data
+    const distFromZone = haversineDistance(finalLat, finalLng, geofenceConfig.lat, geofenceConfig.lng);
+    const isOutsideGeofence = distFromZone > geofenceConfig.radius;
+
+    if (isOutsideGeofence) {
+        console.log(`⚠️ GEOFENCE ALERT: ${trackerId} is ${Math.round(distFromZone)}m from work zone!`);
+    }
+
+    broadcastUpdate({
+        type: 'gps_update',
+        trackerId,
+        lat: finalLat,
+        lng: finalLng,
+        distanceFromZone: Math.round(distFromZone),
+        isOutsideGeofence,
+        timestamp: new Date().toISOString()
+    });
+
+    res.status(200).json({ message: "Location received", distanceFromZone: Math.round(distFromZone), isOutsideGeofence });
+});
+
+// 3. GET INVENTORY STATUS
+app.get('/api/inventory', (req, res) => {
+    db.all(`SELECT * FROM components`, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ components: rows });
+    });
+});
+
+// 3a. ADD COMPONENT
+app.post('/api/components', (req, res) => {
+    const { uid, tracker_id, name } = req.body;
+    if (!uid || !name) return res.status(400).json({ error: "Missing uid or name" });
+    db.run(`INSERT INTO components (uid, tracker_id, name) VALUES (?, ?, ?)`, [uid, tracker_id || null, name], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(201).json({ message: "Component added successfully" });
+    });
+});
+
+// 3b. REMOVE COMPONENT
+app.delete('/api/components/:uid', (req, res) => {
+    db.run(`DELETE FROM components WHERE uid = ?`, [req.params.uid], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: "Component removed successfully" });
+    });
+});
+
+// 4. GET EMPLOYEES
+app.get('/api/employees', (req, res) => {
+    db.all(`SELECT * FROM employees`, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ employees: rows });
+    });
+});
+
+// 4a. ADD EMPLOYEE
+app.post('/api/employees', (req, res) => {
+    const { uid, name } = req.body;
+    if (!uid || !name) return res.status(400).json({ error: "Missing uid or name" });
+    db.run(`INSERT INTO employees (uid, name) VALUES (?, ?)`, [uid, name], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.status(201).json({ message: "Employee added successfully" });
+    });
+});
+
+// 4b. REMOVE EMPLOYEE
+app.delete('/api/employees/:uid', (req, res) => {
+    db.run(`DELETE FROM employees WHERE uid = ?`, [req.params.uid], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: "Employee removed successfully" });
+    });
+});
+
+// 5. GET GPS HISTORY (for trail and playback)
+app.get('/api/tracking/history', (req, res) => {
+    const { trackerId, date } = req.query;
+    let query = `SELECT * FROM gps_logs`;
+    let params = [];
+
+    if (trackerId && date) {
+        query += ` WHERE tracker_id = ? AND DATE(timestamp) = ?`;
+        params = [trackerId, date];
+    } else if (trackerId) {
+        query += ` WHERE tracker_id = ?`;
+        params = [trackerId];
+    }
+
+    query += ` ORDER BY timestamp ASC`;
+
+    db.all(query, params, (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ locations: rows });
+    });
+});
+
+// 6. GET / SET GEOFENCE CONFIG
+app.get('/api/geofence', (req, res) => {
+    res.json(geofenceConfig);
+});
+
+app.post('/api/geofence', (req, res) => {
+    const { lat, lng, radius, name } = req.body;
+    if (lat) geofenceConfig.lat = lat;
+    if (lng) geofenceConfig.lng = lng;
+    if (radius) geofenceConfig.radius = radius;
+    if (name) geofenceConfig.name = name;
+
+    console.log(`Geofence updated: ${JSON.stringify(geofenceConfig)}`);
+
+    broadcastUpdate({ type: 'geofence_config', ...geofenceConfig });
+    res.json({ message: "Geofence updated", config: geofenceConfig });
+});
+
+// 7. GET TRANSACTION HISTORY
+app.get('/api/transactions', (req, res) => {
+    const { date, employeeUid } = req.query;
+
+    let query = `SELECT t.*, e.name as employee_name, c.name as component_name 
+                 FROM transactions t 
+                 LEFT JOIN employees e ON t.employee_uid = e.uid 
+                 LEFT JOIN components c ON t.component_uid = c.uid`;
+    let params = [];
+    let conditions = [];
+
+    if (date) {
+        // Match local date string starting with YYYY-MM-DD
+        conditions.push(`t.timestamp LIKE ?`);
+        params.push(`${date}%`);
+    }
+    if (employeeUid) {
+        conditions.push(`t.employee_uid = ?`);
+        params.push(employeeUid);
+    }
+
+    if (conditions.length > 0) {
+        query += ` WHERE ` + conditions.join(' AND ');
+    }
+
+    query += ` ORDER BY t.timestamp DESC LIMIT 200`;
+
+    db.all(query, params, (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ transactions: rows });
+    });
+});
+
+// 8. LOCATION ANALYTICS (Time at location clusters)
+app.get('/api/tracking/analytics', (req, res) => {
+    const trackerId = req.query.trackerId || 'COMP-ROUTER-001';
+
+    db.all(`SELECT * FROM gps_logs WHERE tracker_id = ? ORDER BY timestamp ASC`, [trackerId], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        // Cluster nearby points (within 50 meters)
+        const clusters = [];
+        let currentCluster = null;
+
+        rows.forEach((point) => {
+            if (!currentCluster) {
+                currentCluster = { lat: point.lat, lng: point.lng, startTime: point.timestamp, endTime: point.timestamp, count: 1 };
+            } else {
+                const dist = haversineDistance(currentCluster.lat, currentCluster.lng, point.lat, point.lng);
+                if (dist < 50) {
+                    currentCluster.endTime = point.timestamp;
+                    currentCluster.count++;
+                } else {
+                    clusters.push({ ...currentCluster });
+                    currentCluster = { lat: point.lat, lng: point.lng, startTime: point.timestamp, endTime: point.timestamp, count: 1 };
+                }
+            }
+        });
+        if (currentCluster) clusters.push(currentCluster);
+
+        // Calculate duration for each cluster
+        const analytics = clusters.map(c => {
+            const start = new Date(c.startTime);
+            const end = new Date(c.endTime);
+            const durationMin = Math.round((end - start) / 60000);
+            const distFromZone = haversineDistance(c.lat, c.lng, geofenceConfig.lat, geofenceConfig.lng);
+            return {
+                lat: c.lat,
+                lng: c.lng,
+                duration: durationMin,
+                readings: c.count,
+                startTime: c.startTime,
+                endTime: c.endTime,
+                distanceFromZone: Math.round(distFromZone),
+                isAuthorized: distFromZone <= geofenceConfig.radius
+            };
+        });
+
+        res.json({ analytics });
+    });
+});
+
+// ==========================================
+// ADMIN APPROVAL WORKFLOW API
+// ==========================================
+
+// Get all requests
+app.get('/api/requests', (req, res) => {
+    db.all(`SELECT r.*, e.name as employee_name, c.name as component_name 
+            FROM requests r
+            JOIN employees e ON r.employee_uid = e.uid
+            JOIN components c ON r.component_uid = c.uid
+            ORDER BY r.timestamp DESC`, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ requests: rows });
+    });
+});
+
+// Employee Creates Request
+app.post('/api/requests', (req, res) => {
+    const { employeeUid, componentUid } = req.body;
+    if (!employeeUid || !componentUid) return res.status(400).json({ error: "Missing UIDs" });
+
+    // Check if component is actually IN inventory
+    db.get(`SELECT status FROM components WHERE uid = ?`, [componentUid], (err, comp) => {
+        if (err || !comp) return res.status(404).json({ error: "Component not found" });
+        if (comp.status === 'OUT') return res.status(400).json({ error: "Component already out in the field" });
+
+        db.run(`INSERT INTO requests (employee_uid, component_uid, status) VALUES (?, ?, 'pending')`,
+            [employeeUid, componentUid], function (err) {
+                if (err) return res.status(500).json({ error: err.message });
+
+                broadcastUpdate({ type: 'new_request' });
+                res.status(201).json({ message: "Request sent for Admin approval" });
+            });
+    });
+});
+
+// Admin Approves Request
+app.post('/api/requests/:id/approve', (req, res) => {
+    const reqId = req.params.id;
+
+    db.get(`SELECT * FROM requests WHERE id = ?`, [reqId], (err, request) => {
+        if (err || !request) return res.status(404).json({ error: "Request not found" });
+
+        // Update Component to be approved for this employee
+        db.run(`UPDATE components SET approved_for_uid = ? WHERE uid = ?`,
+            [request.employee_uid, request.component_uid], (err) => {
+                if (err) return res.status(500).json({ error: err.message });
+
+                // Update Request Status
+                db.run(`UPDATE requests SET status = 'approved' WHERE id = ?`, [reqId], () => {
+                    broadcastUpdate({ type: 'request_update' });
+                    res.json({ message: "Approved successfully. Employee can now check out the item." });
+                });
+            });
+    });
+});
+
+// Admin Rejects Request
+app.post('/api/requests/:id/reject', (req, res) => {
+    db.run(`UPDATE requests SET status = 'rejected' WHERE id = ?`, [req.params.id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        broadcastUpdate({ type: 'request_update' });
+        res.json({ message: "Request rejected." });
+    });
+});
+
+// START SERVER
+const PORT = 3000;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`=========================================`);
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Dashboard available at http://localhost:${PORT}/`);
+    console.log(`=========================================`);
+});

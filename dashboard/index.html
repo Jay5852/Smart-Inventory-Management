@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncTrack - Intelligent Inventory</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="sidebar">
+        <div class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+            <h2>SyncTrack</h2>
+        </div>
+        <nav>
+            <a href="#" class="active" data-tab="overview" onclick="switchTab('overview', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="7" height="7" />
+                    <rect x="14" y="3" width="7" height="7" />
+                    <rect x="14" y="14" width="7" height="7" />
+                    <rect x="3" y="14" width="7" height="7" />
+                </svg>
+                Dashboard
+            </a>
+            <a href="#" data-tab="tracking" onclick="switchTab('tracking', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                    <circle cx="12" cy="10" r="3" />
+                </svg>
+                Live Tracking
+            </a>
+            <a href="#" data-tab="history" onclick="switchTab('history', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                </svg>
+                History & Playback
+            </a>
+            <a href="#" data-tab="approvals" onclick="switchTab('approvals', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    <polyline points="9 12 11 14 15 10" />
+                </svg>
+                Pending Approvals <span id="approval-badge" class="badge"
+                    style="display:none; margin-left:auto; background:var(--danger); color:white;">0</span>
+            </a>
+            <a href="#" data-tab="logs" onclick="switchTab('logs', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="8" y1="6" x2="21" y2="6" />
+                    <line x1="8" y1="12" x2="21" y2="12" />
+                    <line x1="8" y1="18" x2="21" y2="18" />
+                    <line x1="3" y1="6" x2="3.01" y2="6" />
+                    <line x1="3" y1="12" x2="3.01" y2="12" />
+                    <line x1="3" y1="18" x2="3.01" y2="18" />
+                </svg>
+                Transaction Logs
+            </a>
+            <a href="#" data-tab="inventory" onclick="switchTab('inventory', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path
+                        d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                    <line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
+                Inventory
+            </a>
+            <a href="#" data-tab="staff" onclick="switchTab('staff', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+                Staff Management
+            </a>
+            <a href="#" data-tab="network" onclick="switchTab('network', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                    <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                    <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                </svg>
+                Network Settings
+            </a>
+            <a href="#" onclick="logout(); return false;" style="margin-top:auto; color:var(--danger);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+                Logout
+            </a>
+        </nav>
+        <div class="status-indicator">
+            <span class="dot active"></span>
+            Server: <span id="server-status">Connecting...</span>
+        </div>
+    </div>
+
+    <main class="content">
+        <!-- ============ OVERVIEW TAB ============ -->
+        <div id="tab-overview" class="tab-content active">
+            <header>
+                <h1>Admin Overview</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Total Assets</h3>
+                    <div class="value" id="stat-total">0</div>
+                </div>
+                <div class="stat-card warning">
+                    <h3>Assets In Field</h3>
+                    <div class="value" id="stat-out">0</div>
+                </div>
+                <div class="stat-card success">
+                    <h3>Assets In Inventory</h3>
+                    <div class="value" id="stat-in">0</div>
+                </div>
+                <div class="stat-card active-pulse">
+                    <h3>Distance from Zone</h3>
+                    <div class="value" id="stat-distance">—</div>
+                </div>
+            </div>
+            <div class="main-grid">
+                <div class="card feed-card">
+                    <div class="card-header">
+                        <h2>Live RFID Activity</h2><span class="badge">Real-time</span>
+                    </div>
+                    <ul class="activity-feed" id="activity-feed">
+                        <li class="empty-state">Waiting for RFID gate scans...</li>
+                    </ul>
+                </div>
+                <div class="card map-card">
+                    <div class="card-header">
+                        <h2>Live Component Location</h2>
+                        <div class="pulse-icon"></div>
+                    </div>
+                    <div id="mini-map" class="map-container"></div>
+                </div>
+            </div>
+            <!-- Geofence Alert Banner -->
+            <div id="geofence-alert-banner" class="geofence-alert hidden">
+                <span>⚠️</span>
+                <div>
+                    <strong>GEOFENCE VIOLATION</strong>
+                    <p id="geofence-alert-text">Component has left the authorized work zone!</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ LIVE TRACKING TAB ============ -->
+        <div id="tab-tracking" class="tab-content">
+            <header>
+                <h1>Live GPS Tracking</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+            <!-- Tracking Info Bar -->
+            <div class="tracking-info-bar">
+                <div class="info-item">
+                    <span class="info-label">Status</span>
+                    <span class="info-value" id="track-status">Tracking Active</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Distance from Zone</span>
+                    <span class="info-value highlight" id="track-distance">— m</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Last Update</span>
+                    <span class="info-value" id="track-last-update">—</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Coordinates</span>
+                    <span class="info-value" id="track-coords">—</span>
+                </div>
+            </div>
+            <!-- Full Map -->
+            <div class="card full-map-card">
+                <div id="full-map" class="full-map-container"></div>
+            </div>
+            <!-- Geofence Controls -->
+            <div class="card mt-2">
+                <div class="card-header">
+                    <h2>Geofence Settings</h2>
+                </div>
+                <div class="geofence-controls">
+                    <div class="control-group full-width-group" style="width: 100%; margin-bottom: 12px;">
+                        <label>Search Location</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="geo-search" placeholder="e.g. Pune Station, Hinjawadi"
+                                style="flex: 1;">
+                            <button class="btn-secondary" onclick="searchLocation()">🔍 Search</button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>Zone Center Latitude</label>
+                        <input type="number" id="geo-lat" step="0.0001" value="18.5204">
+                    </div>
+                    <div class="control-group">
+                        <label>Zone Center Longitude</label>
+                        <input type="number" id="geo-lng" step="0.0001" value="73.8567">
+                    </div>
+                    <div class="control-group">
+                        <label>Radius (meters)</label>
+                        <input type="number" id="geo-radius" value="500" min="50" max="5000">
+                    </div>
+                    <button class="btn-secondary" id="btn-select-map" onclick="toggleMapSelection()">📍 Select on
+                        Map</button>
+                    <button class="btn-primary" onclick="updateGeofence()">Update Work Zone</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ HISTORY & PLAYBACK TAB ============ -->
+        <div id="tab-history" class="tab-content">
+            <header>
+                <h1>Location History & Analysis</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+            <div class="history-controls">
+                <div class="control-group">
+                    <label>Select Date</label>
+                    <input type="date" id="history-date">
+                </div>
+                <button class="btn-primary" onclick="loadHistory()">Load Trail</button>
+                <button class="btn-secondary" onclick="playbackTrail()">▶ Playback</button>
+                <button class="btn-secondary" onclick="stopPlayback()">⏹ Stop</button>
+            </div>
+            <div class="card full-map-card">
+                <div id="history-map" class="full-map-container"></div>
+            </div>
+            <!-- Time-at-Location Report -->
+            <div class="card mt-2">
+                <div class="card-header">
+                    <h2>Time-at-Location Report</h2>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Location</th>
+                            <th>Time Spent</th>
+                            <th>Distance from Zone</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="analytics-tbody">
+                        <tr>
+                            <td colspan="4" class="text-center">Select a date and load trail to see analytics</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============ ADMIN APPROVALS TAB ============ -->
+        <div id="tab-approvals" class="tab-content">
+            <header>
+                <h1>Checkout Approvals</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2>Pending Employee Requests</h2>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Requested Item</th>
+                            <th>Time</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="approvals-tbody">
+                        <tr>
+                            <td colspan="4" class="text-center">Loading requests...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card mt-2">
+                <div class="card-header">
+                    <h2>Decision History</h2>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Item</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="approvals-history-tbody">
+                        <tr>
+                            <td colspan="3" class="text-center">No history</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============ TRANSACTION LOGS TAB ============ -->
+        <div id="tab-logs" class="tab-content">
+            <header>
+                <h1>Transaction Logs</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+
+            <div class="history-controls">
+                <div class="control-group">
+                    <label>Filter by Date</label>
+                    <input type="date" id="log-filter-date">
+                </div>
+                <div class="control-group" style="min-width: 200px;">
+                    <label>Filter by Employee</label>
+                    <select id="log-filter-emp"
+                        style="width:100%; padding:10px 14px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:8px;">
+                        <option value="">All Employees</option>
+                    </select>
+                </div>
+                <button class="btn-primary" onclick="loadLogsData()">🔍 Search Logs</button>
+                <button class="btn-secondary" onclick="clearLogFilters()">Reset Filters</button>
+            </div>
+
+            <div class="card full-width">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Action</th>
+                            <th>Equipment</th>
+                            <th>Employee</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-tbody">
+                        <tr>
+                            <td colspan="4" class="text-center">Loading logs...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============ TRANSACTION LOGS TAB ============ -->
+        <div id="tab-logs" class="tab-content">
+            <header>
+                <h1>Transaction Logs</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+
+            <div class="history-controls">
+                <div class="control-group">
+                    <label>Filter by Date</label>
+                    <input type="date" id="log-filter-date">
+                </div>
+                <div class="control-group" style="min-width: 200px;">
+                    <label>Filter by Employee</label>
+                    <select id="log-filter-emp"
+                        style="width:100%; padding:10px 14px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:8px;">
+                        <option value="">All Employees</option>
+                    </select>
+                </div>
+                <button class="btn-primary" onclick="loadLogsData()">🔍 Search Logs</button>
+                <button class="btn-secondary" onclick="clearLogFilters()">Reset Filters</button>
+            </div>
+
+            <div class="card full-width">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Action</th>
+                            <th>Equipment</th>
+                            <th>Employee</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-tbody">
+                        <tr>
+                            <td colspan="4" class="text-center">Loading logs...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============ INVENTORY TAB ============ -->
+        <div id="tab-inventory" class="tab-content">
+            <header>
+                <h1>Asset Register</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+
+            <div class="card mb-2"
+                style="background:var(--bg-card); padding:20px; border-radius:12px; border:1px solid var(--border);">
+                <h3 style="margin-top:0; margin-bottom:15px; font-size:1.1rem;">➕ Register New Component</h3>
+                <div style="display:flex; gap:15px; align-items:flex-end;">
+                    <div style="flex:1;">
+                        <label
+                            style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">Component
+                            Name</label>
+                        <input type="text" id="add-comp-name" placeholder="e.g. Fluke Multimeter"
+                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                    </div>
+                    <div style="flex:1;">
+                        <label
+                            style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">RFID
+                            Tag UID</label>
+                        <input type="text" id="add-comp-uid" placeholder="Hex UID"
+                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                    </div>
+                    <div style="flex:1;">
+                        <label
+                            style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">GPS
+                            Tracker ID (Optional)</label>
+                        <input type="text" id="add-comp-tracker" placeholder="e.g. TRACK-001"
+                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                    </div>
+                    <button class="btn-primary" onclick="addComponent()" style="padding:10px 20px; height:41px;">Save
+                        Component</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Asset Name</th>
+                            <th>Component UID (RFID)</th>
+                            <th>Tracker ID (GPS)</th>
+                            <th>Status</th>
+                            <th>Assigned To</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inventory-tbody">
+                        <tr>
+                            <td colspan="6" class="text-center">Loading inventory...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Transaction History -->
+            <div class="card mt-2">
+                <div class="card-header">
+                    <h2>Transaction History</h2>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>Employee</th>
+                            <th>Action</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transactions-tbody">
+                        <tr>
+                            <td colspan="4" class="text-center">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============ STAFF TAB ============ -->
+        <div id="tab-staff" class="tab-content">
+            <header>
+                <h1>Staff Management</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+
+            <div class="card mb-2"
+                style="background:var(--bg-card); padding:20px; border-radius:12px; border:1px solid var(--border);">
+                <h3 style="margin-top:0; margin-bottom:15px; font-size:1.1rem;">➕ Register New Employee</h3>
+                <div style="display:flex; gap:15px; align-items:flex-end;">
+                    <div style="flex:2;">
+                        <label
+                            style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">Employee
+                            Name</label>
+                        <input type="text" id="add-emp-name" placeholder="Full Name"
+                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                    </div>
+                    <div style="flex:2;">
+                        <label
+                            style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">Staff
+                            ID Card (RFID UID)</label>
+                        <input type="text" id="add-emp-uid" placeholder="Hex UID"
+                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                    </div>
+                    <button class="btn-primary" onclick="addEmployee()"
+                        style="flex:1; padding:10px 20px; height:41px;">Save Employee</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Employee Name</th>
+                            <th>RFID Card UID</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="staff-tbody">
+                        <tr>
+                            <td colspan="3" class="text-center">Loading staff...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============ NETWORK SETTINGS TAB ============ -->
+        <div id="tab-network" class="tab-content">
+            <header>
+                <h1>📡 Network Settings</h1>
+                <p>Configure the WiFi credentials that ESP32 devices will automatically fetch when they connect to an
+                    open network.</p>
+            </header>
+
+            <div class="card">
+                <h3>Device WiFi Configuration</h3>
+                <p style="color:var(--text-secondary); margin-bottom:15px;">Enter the WiFi network you want your Gate
+                    Reader and GPS Tracker to connect to. When a device selects "Fetch WiFi" from its Admin Menu, it
+                    will download these credentials and save them permanently.</p>
+
+                <div style="display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
+                    <div style="flex:2;">
+                        <label
+                            style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">WiFi
+                            Network Name (SSID)</label>
+                        <input type="text" id="wifi-ssid" placeholder="e.g. MyHotspot"
+                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                    </div>
+                    <div style="flex:2;">
+                        <label
+                            style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">WiFi
+                            Password</label>
+                        <input type="password" id="wifi-password" placeholder="Password"
+                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                    </div>
+                    <button class="btn-primary" onclick="saveWifiConfig()"
+                        style="flex:1; padding:10px 20px; height:41px;">Save & Push to Devices</button>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:20px;">
+                <h3>How It Works</h3>
+                <ol style="color:var(--text-secondary); line-height:1.8;">
+                    <li>Enter your WiFi SSID and Password above and click <strong>Save</strong>.</li>
+                    <li>On the ESP32 Gate Reader, hold the <strong>SETUP</strong> button for 3 seconds.</li>
+                    <li>Scan the <strong>Admin Card</strong> to unlock the menu.</li>
+                    <li>Select <strong>"Fetch WiFi Config"</strong> from the menu.</li>
+                    <li>The device will connect to an open network, download these credentials, and reconnect securely.
+                    </li>
+                </ol>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast-container" class="toast-container"></div>
+    <script src="app.js"></script>
+</body>
+
+</html>

@@ -44,14 +44,7 @@
                 </svg>
                 History & Playback
             </a>
-            <a href="#" data-tab="approvals" onclick="switchTab('approvals', this)">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                    <polyline points="9 12 11 14 15 10" />
-                </svg>
-                Pending Approvals <span id="approval-badge" class="badge"
-                    style="display:none; margin-left:auto; background:var(--danger); color:white;">0</span>
-            </a>
+
             <a href="#" data-tab="logs" onclick="switchTab('logs', this)">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="8" y1="6" x2="21" y2="6" />
@@ -106,6 +99,20 @@
     </div>
 
     <main class="content">
+        <div class="command-bar">
+            <div class="command-meta">
+                <p class="command-label">Operations Console</p>
+                <h2 id="command-tab-title">Admin Overview</h2>
+            </div>
+            <div class="command-actions">
+                <span class="command-live" id="command-live-state">Live sync pending...</span>
+                <button class="btn-secondary" onclick="refreshLiveAdminData()">Refresh Data</button>
+                <button class="btn-secondary"
+                    onclick="switchTab('tracking', document.querySelector('nav a[data-tab=\'tracking\']'))">Go Live Tracking</button>
+                <button class="btn-primary"
+                    onclick="switchTab('network', document.querySelector('nav a[data-tab=\'network\']'))">Open Network Settings</button>
+            </div>
+        </div>
         <!-- ============ OVERVIEW TAB ============ -->
         <div id="tab-overview" class="tab-content active">
             <header>
@@ -267,55 +274,7 @@
         </div>
 
         <!-- ============ ADMIN APPROVALS TAB ============ -->
-        <div id="tab-approvals" class="tab-content">
-            <header>
-                <h1>Checkout Approvals</h1>
-                <div class="user-profile">
-                    <div class="avatar">A</div><span>Administrator</span>
-                </div>
-            </header>
 
-            <div class="card">
-                <div class="card-header">
-                    <h2>Pending Employee Requests</h2>
-                </div>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Employee</th>
-                            <th>Requested Item</th>
-                            <th>Time</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="approvals-tbody">
-                        <tr>
-                            <td colspan="4" class="text-center">Loading requests...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="card mt-2">
-                <div class="card-header">
-                    <h2>Decision History</h2>
-                </div>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Employee</th>
-                            <th>Item</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="approvals-history-tbody">
-                        <tr>
-                            <td colspan="3" class="text-center">No history</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
 
         <!-- ============ TRANSACTION LOGS TAB ============ -->
         <div id="tab-logs" class="tab-content">
@@ -547,37 +506,27 @@
             <div class="card">
                 <h3>Device WiFi Configuration</h3>
                 <p style="color:var(--text-secondary); margin-bottom:15px;">Enter the WiFi network you want your Gate
-                    Reader and GPS Tracker to connect to. When a device selects "Fetch WiFi" from its Admin Menu, it
-                    will download these credentials and save them permanently.</p>
+                    Reader and GPS Tracker to connect to. Add one or more company WiFi profiles and the device will
+                    store them in flash permanently.</p>
 
-                <div style="display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
-                    <div style="flex:2;">
-                        <label
-                            style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">WiFi
-                            Network Name (SSID)</label>
-                        <input type="text" id="wifi-ssid" placeholder="e.g. MyHotspot"
-                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
-                    </div>
-                    <div style="flex:2;">
-                        <label
-                            style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">WiFi
-                            Password</label>
-                        <input type="password" id="wifi-password" placeholder="Password"
-                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
-                    </div>
+                <div id="wifi-profiles-container" style="display:grid; gap:12px; margin-bottom:15px;"></div>
+
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn-secondary" onclick="addWifiProfileRow()"
+                        style="padding:10px 16px;">+ Add Another Network</button>
                     <button class="btn-primary" onclick="saveWifiConfig()"
-                        style="flex:1; padding:10px 20px; height:41px;">Save & Push to Devices</button>
+                        style="padding:10px 20px;">Save & Push to Devices</button>
                 </div>
             </div>
 
             <div class="card" style="margin-top:20px;">
                 <h3>How It Works</h3>
                 <ol style="color:var(--text-secondary); line-height:1.8;">
-                    <li>Enter your WiFi SSID and Password above and click <strong>Save</strong>.</li>
-                    <li>On the ESP32 Gate Reader, hold the <strong>SETUP</strong> button for 3 seconds.</li>
+                    <li>Enter one or more WiFi SSID and Password pairs above and click <strong>Save</strong>.</li>
+                    <li>On the ESP32 Gate Reader, hold the <strong>SELECT</strong> button for 3 seconds.</li>
                     <li>Scan the <strong>Admin Card</strong> to unlock the menu.</li>
                     <li>Select <strong>"Fetch WiFi Config"</strong> from the menu.</li>
-                    <li>The device will connect to an open network, download these credentials, and reconnect securely.
+                    <li>The device will connect to a network, download the profiles, store them in flash, and reconnect securely.
                     </li>
                 </ol>
             </div>

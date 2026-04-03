@@ -21,8 +21,8 @@ The NEO-6M communicates using UART (Serial2).
 |------------|-----------|------|
 | **VCC**    | **VIN / 5V** | Powering from VIN ensures a stable satellite lock. |
 | **GND**    | **GND**      | Ground. |
-| **TX**     | **D16 (RX2)**| Transmits the GPS data from the module into the ESP32. |
-| **RX**     | **D17 (TX2)**| *(Optional)* Receives commands. |
+| **TX**     | **D26 (RX2)**| Transmits the GPS data from the module into the ESP32. |
+| **RX**     | **D27 (TX2)**| *(Optional)* Receives commands from ESP32. |
 
 ### Step 2: Connect the SIM800L GSM Module (Phase 4)
 The SIM800L requires its own UART connection (Serial1) and handles the GPRS data transmission when the component is taken out of the yard.
@@ -31,8 +31,8 @@ The SIM800L requires its own UART connection (Serial1) and handles the GPRS data
 |-------------|-----------|------|
 | **VCC**     | **BAT+ / 4.0V** | **CRITICAL:** Do NOT connect to ESP32 3V3 or 5V. The SIM800L pulls 2A peaks! Connect directly to a 3.7V LiPo or use an LM2596 to drop 5V to exactly ~4.0V. |
 | **GND**     | **GND**   | MUST share a common ground with the ESP32. |
-| **TXD**     | **D14**   | ESP32 RX1 |
-| **RXD**     | **D15**   | ESP32 TX1 |
+| **RXD**     | **D33**   | ESP32 RX1 |
+| **TXD**     | **D32**   | ESP32 TX1 |
 
 ### Step 3: Connect the Battery & Power
 *(Note: Skip this step if you are just testing by plugging the ESP32 directly into your laptop via USB).*

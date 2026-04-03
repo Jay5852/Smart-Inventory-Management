@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const WebSocket = require('ws');
 const http = require('http');
+const crypto = require('crypto');
 const db = require('./db');
 const path = require('path');
 
@@ -13,6 +14,114 @@ const wss = new WebSocket.Server({ server });
 app.use(cors());
 app.use(bodyParser.json());
 
+const ROLE_LEVEL = {
+    operator: 1,
+    manager: 2,
+    admin: 3
+};
+
+const activeSessions = new Map();
+
+function normalizeRole(role) {
+    const clean = String(role || '').toLowerCase();
+    return ROLE_LEVEL[clean] ? clean : 'operator';
+}
+
+function issueToken(user) {
+    const token = crypto.randomBytes(24).toString('hex');
+    activeSessions.set(token, {
+        username: user.username,
+        role: normalizeRole(user.role),
+        displayName: user.display_name || user.username,
+        createdAt: Date.now()
+    });
+    return token;
+}
+
+function getClientIp(req) {
+    return req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+}
+
+function getAuthContext(req) {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : req.headers['x-auth-token'];
+    if (!token) {
+        return null;
+    }
+    const session = activeSessions.get(token);
+    if (!session) {
+        return null;
+    }
+    return { ...session, token };
+}
+
+function requireRole(minRole, options = {}) {
+    const required = normalizeRole(minRole);
+    const allowPrototypeFallback = options.allowPrototypeFallback !== false;
+
+    return (req, res, next) => {
+        const auth = getAuthContext(req);
+        req.auth = auth;
+
+        if (!auth) {
+            if (allowPrototypeFallback) {
+                req.auth = {
+                    username: 'prototype-admin',
+                    role: 'admin',
+                    displayName: 'Prototype Admin'
+                };
+                return next();
+            }
+            return res.status(401).json({ error: 'Authentication required' });
+        }
+
+        if (ROLE_LEVEL[auth.role] < ROLE_LEVEL[required]) {
+            return res.status(403).json({ error: `Requires ${required} role or higher` });
+        }
+
+        return next();
+    };
+}
+
+function writeAuditLog(entry) {
+    const payload = {
+        actor_username: entry.actorUsername || 'system',
+        actor_role: normalizeRole(entry.actorRole || 'operator'),
+        action: entry.action || 'unknown_action',
+        entity_type: entry.entityType || null,
+        entity_id: entry.entityId || null,
+        status: entry.status || 'success',
+        details: entry.details ? JSON.stringify(entry.details) : null,
+        ip_address: entry.ipAddress || null
+    };
+
+    db.run(`INSERT INTO audit_logs
+        (actor_username, actor_role, action, entity_type, entity_id, status, details, ip_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
+        payload.actor_username,
+        payload.actor_role,
+        payload.action,
+        payload.entity_type,
+        payload.entity_id,
+        payload.status,
+        payload.details,
+        payload.ip_address
+    ], (err) => {
+        if (err) {
+            console.error('Failed to write audit log:', err.message);
+        }
+    });
+}
+
+function auditFromRequest(req, event) {
+    writeAuditLog({
+        actorUsername: req.auth?.username || 'anonymous',
+        actorRole: req.auth?.role || 'operator',
+        ipAddress: getClientIp(req),
+        ...event
+    });
+}
+
 // Serve the dashboard statically
 app.use(express.static(path.join(__dirname, '../dashboard')));
 
@@ -21,12 +130,59 @@ app.use(express.static(path.join(__dirname, '../dashboard')));
 // ==========================================
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    // Hardcoded simple admin for prototype
-    if (username === 'admin' && password === 'admin') {
-        res.json({ token: 'admin_authenticated_token_' + Date.now() });
-    } else {
-        res.status(401).json({ error: 'Invalid credentials' });
+
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password are required' });
     }
+
+    db.get(`SELECT username, password, role, display_name, is_active
+            FROM users WHERE username = ?`, [username], (err, user) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error' });
+        }
+
+        if (!user || !user.is_active || user.password !== password) {
+            writeAuditLog({
+                actorUsername: username,
+                actorRole: 'operator',
+                action: 'auth.login',
+                entityType: 'session',
+                entityId: username,
+                status: 'failed',
+                details: { reason: 'invalid_credentials' },
+                ipAddress: getClientIp(req)
+            });
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        const token = issueToken(user);
+
+        writeAuditLog({
+            actorUsername: user.username,
+            actorRole: user.role,
+            action: 'auth.login',
+            entityType: 'session',
+            entityId: token.slice(0, 12),
+            status: 'success',
+            details: { displayName: user.display_name || user.username },
+            ipAddress: getClientIp(req)
+        });
+
+        return res.json({
+            token,
+            role: normalizeRole(user.role),
+            username: user.username,
+            displayName: user.display_name || user.username
+        });
+    });
+});
+
+app.get('/api/auth/me', requireRole('operator'), (req, res) => {
+    res.json({
+        username: req.auth.username,
+        role: req.auth.role,
+        displayName: req.auth.displayName || req.auth.username
+    });
 });
 
 // ==========================================
@@ -60,21 +216,64 @@ app.post('/api/enroll', (req, res) => {
 // ==========================================
 // WIFI CONFIG (OTA Provisioning for ESP32)
 // ==========================================
-let wifiConfig = { ssid: '', password: '' };
+let wifiProfiles = [];
+
+function normalizeWifiProfiles(body) {
+    if (Array.isArray(body.profiles)) {
+        return body.profiles
+            .map(profile => ({
+                ssid: String(profile.ssid || '').trim(),
+                password: String(profile.password || '')
+            }))
+            .filter(profile => profile.ssid.length > 0)
+            .slice(0, 5);
+    }
+
+    const ssid = String(body.ssid || '').trim();
+    if (!ssid) {
+        return [];
+    }
+
+    return [{ ssid, password: String(body.password || '') }];
+}
 
 app.get('/api/wifi-config', (req, res) => {
-    if (!wifiConfig.ssid) {
-        return res.status(404).json({ error: "No WiFi config set yet. Set it from the Dashboard." });
+    if (wifiProfiles.length === 0) {
+        return res.status(404).json({ error: "No WiFi profiles set yet. Set them from the Dashboard." });
     }
-    res.json(wifiConfig);
+
+    res.json({ profiles: wifiProfiles, count: wifiProfiles.length });
 });
 
-app.post('/api/wifi-config', (req, res) => {
-    const { ssid, password } = req.body;
-    if (!ssid) return res.status(400).json({ error: "SSID is required" });
-    wifiConfig = { ssid, password: password || '' };
-    broadcastUpdate({ type: 'alert', message: `📡 WiFi Config updated: ${ssid}. Devices will fetch on next sync.`, severity: 'info' });
-    res.json({ message: "WiFi config saved. ESP32 devices will pick it up automatically." });
+app.post('/api/wifi-config', requireRole('manager'), (req, res) => {
+    const profiles = normalizeWifiProfiles(req.body || {});
+
+    if (profiles.length === 0) {
+        return res.status(400).json({ error: "At least one SSID is required" });
+    }
+
+    wifiProfiles = profiles;
+
+    auditFromRequest(req, {
+        action: 'wifi.update_profiles',
+        entityType: 'wifi_config',
+        entityId: 'global',
+        details: { count: wifiProfiles.length }
+    });
+
+    broadcastUpdate({
+        type: 'alert',
+        message: `📡 WiFi profiles updated (${wifiProfiles.length}). Devices will fetch on next sync.`,
+        severity: 'info'
+    });
+
+    broadcastUpdate({ type: 'wifi_config_updated', profiles: wifiProfiles, count: wifiProfiles.length });
+
+    res.json({
+        message: "WiFi profiles saved. ESP32 devices will pick them up automatically.",
+        profiles: wifiProfiles,
+        count: wifiProfiles.length
+    });
 });
 
 // ==========================================
@@ -150,18 +349,15 @@ app.post('/api/transactions/scan', (req, res) => {
                     let newStatus = isCheckingOut ? 'OUT' : 'IN';
                     let assignedTo = isCheckingOut ? emp.name : null;
 
-                    // --- ADMIN APPROVAL CHECK ---
-                    if (isCheckingOut && comp.approved_for_uid !== realEmpUid) {
-                        console.log(`❌ Access Denied: ${emp.name} tried to take ${comp.name} without approval!`);
-
-                        // Alert Dashboard of unauthorized attempt
+                    // --- AUTOMATIC CHECKOUT ---
+                    // The employee scanned both tags, immediately check it out to them.
+                    if (isCheckingOut) {
+                        console.log(`✅ Automatic Checkout: ${emp.name} is taking ${comp.name}`);
                         broadcastUpdate({
                             type: 'alert',
-                            message: `⚠️ Unauthorized check-out attempt: ${emp.name} tried to take ${comp.name} without approval!`,
-                            severity: 'danger'
+                            message: `✅ Successful Check-out: ${emp.name} took ${comp.name}. GPS tracking started.`,
+                            severity: 'info'
                         });
-
-                        return res.status(403).json({ error: "Access Denied: Admin Approval Required" });
                     }
 
                     db.run(`UPDATE components SET status = ?, assigned_to = ?, approved_for_uid = NULL WHERE uid = ?`,
@@ -251,19 +447,32 @@ app.get('/api/inventory', (req, res) => {
 });
 
 // 3a. ADD COMPONENT
-app.post('/api/components', (req, res) => {
+app.post('/api/components', requireRole('manager'), (req, res) => {
     const { uid, tracker_id, name } = req.body;
     if (!uid || !name) return res.status(400).json({ error: "Missing uid or name" });
     db.run(`INSERT INTO components (uid, tracker_id, name) VALUES (?, ?, ?)`, [uid, tracker_id || null, name], function (err) {
         if (err) return res.status(500).json({ error: err.message });
+        auditFromRequest(req, {
+            action: 'component.create',
+            entityType: 'component',
+            entityId: uid,
+            details: { name, tracker_id: tracker_id || null }
+        });
+        broadcastUpdate({ type: 'inventory_update', action: 'component_added', component: name, componentUid: uid });
         res.status(201).json({ message: "Component added successfully" });
     });
 });
 
 // 3b. REMOVE COMPONENT
-app.delete('/api/components/:uid', (req, res) => {
+app.delete('/api/components/:uid', requireRole('manager'), (req, res) => {
     db.run(`DELETE FROM components WHERE uid = ?`, [req.params.uid], function (err) {
         if (err) return res.status(500).json({ error: err.message });
+        auditFromRequest(req, {
+            action: 'component.delete',
+            entityType: 'component',
+            entityId: req.params.uid
+        });
+        broadcastUpdate({ type: 'inventory_update', action: 'component_deleted', componentUid: req.params.uid });
         res.json({ message: "Component removed successfully" });
     });
 });
@@ -277,19 +486,32 @@ app.get('/api/employees', (req, res) => {
 });
 
 // 4a. ADD EMPLOYEE
-app.post('/api/employees', (req, res) => {
+app.post('/api/employees', requireRole('manager'), (req, res) => {
     const { uid, name } = req.body;
     if (!uid || !name) return res.status(400).json({ error: "Missing uid or name" });
     db.run(`INSERT INTO employees (uid, name) VALUES (?, ?)`, [uid, name], function (err) {
         if (err) return res.status(500).json({ error: err.message });
+        auditFromRequest(req, {
+            action: 'employee.create',
+            entityType: 'employee',
+            entityId: uid,
+            details: { name }
+        });
+        broadcastUpdate({ type: 'inventory_update', action: 'employee_added', employee: name, employeeUid: uid });
         res.status(201).json({ message: "Employee added successfully" });
     });
 });
 
 // 4b. REMOVE EMPLOYEE
-app.delete('/api/employees/:uid', (req, res) => {
+app.delete('/api/employees/:uid', requireRole('manager'), (req, res) => {
     db.run(`DELETE FROM employees WHERE uid = ?`, [req.params.uid], function (err) {
         if (err) return res.status(500).json({ error: err.message });
+        auditFromRequest(req, {
+            action: 'employee.delete',
+            entityType: 'employee',
+            entityId: req.params.uid
+        });
+        broadcastUpdate({ type: 'inventory_update', action: 'employee_deleted', employeeUid: req.params.uid });
         res.json({ message: "Employee removed successfully" });
     });
 });
@@ -321,7 +543,7 @@ app.get('/api/geofence', (req, res) => {
     res.json(geofenceConfig);
 });
 
-app.post('/api/geofence', (req, res) => {
+app.post('/api/geofence', requireRole('manager'), (req, res) => {
     const { lat, lng, radius, name } = req.body;
     if (lat) geofenceConfig.lat = lat;
     if (lng) geofenceConfig.lng = lng;
@@ -329,6 +551,13 @@ app.post('/api/geofence', (req, res) => {
     if (name) geofenceConfig.name = name;
 
     console.log(`Geofence updated: ${JSON.stringify(geofenceConfig)}`);
+
+    auditFromRequest(req, {
+        action: 'geofence.update',
+        entityType: 'geofence',
+        entityId: 'default_zone',
+        details: geofenceConfig
+    });
 
     broadcastUpdate({ type: 'geofence_config', ...geofenceConfig });
     res.json({ message: "Geofence updated", config: geofenceConfig });
@@ -364,6 +593,29 @@ app.get('/api/transactions', (req, res) => {
     db.all(query, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ transactions: rows });
+    });
+});
+
+// 7b. AUDIT LOGS (RBAC foundation endpoint)
+app.get('/api/audit-logs', requireRole('manager'), (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit || '100', 10), 500);
+    const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
+    const action = req.query.action ? String(req.query.action) : null;
+
+    let query = `SELECT * FROM audit_logs`;
+    const params = [];
+
+    if (action) {
+        query += ` WHERE action = ?`;
+        params.push(action);
+    }
+
+    query += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    db.all(query, params, (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ logs: rows, limit, offset, count: rows.length });
     });
 });
 
@@ -453,7 +705,7 @@ app.post('/api/requests', (req, res) => {
 });
 
 // Admin Approves Request
-app.post('/api/requests/:id/approve', (req, res) => {
+app.post('/api/requests/:id/approve', requireRole('manager'), (req, res) => {
     const reqId = req.params.id;
 
     db.get(`SELECT * FROM requests WHERE id = ?`, [reqId], (err, request) => {
@@ -466,6 +718,15 @@ app.post('/api/requests/:id/approve', (req, res) => {
 
                 // Update Request Status
                 db.run(`UPDATE requests SET status = 'approved' WHERE id = ?`, [reqId], () => {
+                    auditFromRequest(req, {
+                        action: 'request.approve',
+                        entityType: 'request',
+                        entityId: String(reqId),
+                        details: {
+                            employee_uid: request.employee_uid,
+                            component_uid: request.component_uid
+                        }
+                    });
                     broadcastUpdate({ type: 'request_update' });
                     res.json({ message: "Approved successfully. Employee can now check out the item." });
                 });
@@ -474,9 +735,14 @@ app.post('/api/requests/:id/approve', (req, res) => {
 });
 
 // Admin Rejects Request
-app.post('/api/requests/:id/reject', (req, res) => {
+app.post('/api/requests/:id/reject', requireRole('manager'), (req, res) => {
     db.run(`UPDATE requests SET status = 'rejected' WHERE id = ?`, [req.params.id], (err) => {
         if (err) return res.status(500).json({ error: err.message });
+        auditFromRequest(req, {
+            action: 'request.reject',
+            entityType: 'request',
+            entityId: String(req.params.id)
+        });
         broadcastUpdate({ type: 'request_update' });
         res.json({ message: "Request rejected." });
     });

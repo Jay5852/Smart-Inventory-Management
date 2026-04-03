@@ -56,6 +56,31 @@ const db = new sqlite3.Database(dbPath, (err) => {
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )`);
 
+            // Users (RBAC foundation)
+            db.run(`CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'operator',
+                display_name TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`);
+
+            // Audit Logs
+            db.run(`CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_username TEXT,
+                actor_role TEXT,
+                action TEXT NOT NULL,
+                entity_type TEXT,
+                entity_id TEXT,
+                status TEXT NOT NULL DEFAULT 'success',
+                details TEXT,
+                ip_address TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`);
+
             // Insert Real Data if Empty
             db.get("SELECT COUNT(*) as count FROM employees", (err, row) => {
                 if (row && row.count === 0) {
@@ -70,6 +95,15 @@ const db = new sqlite3.Database(dbPath, (err) => {
                     console.log("Inserting components...");
                     db.run(`INSERT INTO components (uid, tracker_id, name) VALUES ('D6F87C05', 'COMP-ROUTER-001', 'Cisco Router ASR-1000')`);
                     db.run(`INSERT INTO components (uid, tracker_id, name) VALUES ('55667788', 'COMP-SWITCH-002', 'Juniper Switch EX4300')`);
+                }
+            });
+
+            db.get("SELECT COUNT(*) as count FROM users", (err, row) => {
+                if (row && row.count === 0) {
+                    console.log("Inserting default users...");
+                    db.run(`INSERT INTO users (username, password, role, display_name) VALUES ('admin', 'admin', 'admin', 'System Administrator')`);
+                    db.run(`INSERT INTO users (username, password, role, display_name) VALUES ('manager', 'manager', 'manager', 'Operations Manager')`);
+                    db.run(`INSERT INTO users (username, password, role, display_name) VALUES ('operator', 'operator', 'operator', 'Gate Operator')`);
                 }
             });
         });

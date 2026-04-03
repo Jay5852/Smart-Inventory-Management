@@ -1,44 +1,20 @@
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include <Arduino.h>
 #include <HTTPClient.h>
-#include <MFRC522.h>
 #include <Preferences.h>
-#include <SPI.h>
 #include <WiFi.h>
-#include <Wire.h>
 
-// ==========================================
-// PIN DEFINITIONS
-// ==========================================
-#define RST_PIN 33
-#define SS_PIN 14
-#define BUZZER_PIN 4
-#define BTN_UP 12
-#define BTN_DOWN 13
-#define BTN_SELECT 2
-#define BTN_SETUP 15
-
-// ==========================================
-// OLED DISPLAY
-// ==========================================
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-// ==========================================
-// OBJECTS
-// ==========================================
-MFRC522 mfrc522(SS_PIN, RST_PIN);
+#include "hal_buttons.h"
+#include "hal_buzzer.h"
+#include "hal_config.h"
+#include "hal_display.h"
+#include "hal_rfid.h"
+#include "hal_wifi.h"
 Preferences prefs; // Non-volatile storage (like EEPROM but better)
 
 // ==========================================
 // GLOBAL STATE
 // ==========================================
 String adminCardUID = "";
-String savedSSID = "";
-String savedPass = "";
 String serverIP = "10.93.23.163";
 int serverPort = 3000;
 
@@ -50,6 +26,8 @@ ScanState scanState = SCAN_FIRST;
 
 String scannedID1 = "";
 String scannedID2 = "";
+WifiProfile wifiProfiles[MAX_WIFI_PROFILES];
+uint8_t wifiProfileCount = 0;
 
 // Admin Menu
 int menuIndex = 0;
@@ -66,13 +44,11 @@ void connectToOpenNetwork();
 void resetScreen();
 void sendScanToServer();
 void enterAdminMenu();
+void enterSetupAccess();
 void drawMenu();
 void handleMenuAction();
 void enrollCard(const char *type);
 void fetchWiFiFromServer();
-String readRFIDCard();
-void showMessage(String line1, String line2 = "", String line3 = "");
-void beep(int times);
 
 // ==========================================
 // SETUP
@@ -80,31 +56,15 @@ void beep(int times);
 void setup() {
   Serial.begin(115200);
 
-  // Buttons (using internal pull-ups)
-  pinMode(BTN_UP, INPUT_PULLUP);
-  pinMode(BTN_DOWN, INPUT_PULLUP);
-  pinMode(BTN_SELECT, INPUT_PULLUP);
-  pinMode(BTN_SETUP, INPUT_PULLUP);
-  pinMode(BUZZER_PIN, OUTPUT);
-
-  // SPI & RFID
-  SPI.begin(5, 27, 26, 14);
-  mfrc522.PCD_Init();
-
-  // OLED
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println(F("OLED Init Failed"));
-    for (;;)
-      ;
-  }
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
+  initButtons();
+  initBuzzer();
+  initDisplay();
+  initRFID();
 
   // Load saved settings from flash memory
   prefs.begin("inventory", false);
   adminCardUID = prefs.getString("adminUID", "");
-  savedSSID = prefs.getString("wifiSSID", "");
-  savedPass = prefs.getString("wifiPass", "");
+  loadWifiProfiles(prefs, wifiProfiles, wifiProfileCount);
 
   // ---- FIRST BOOT CHECK ----
   if (adminCardUID == "") {
@@ -113,10 +73,10 @@ void setup() {
   }
 
   // Connect to WiFi
-  if (savedSSID != "") {
+  if (wifiProfileCount > 0) {
     connectToWiFi();
   } else {
-    showMessage("No WiFi Saved!", "Enter Admin Menu", "to setup WiFi");
+    showMessage("No WiFi Saved!", "Push from Dashboard", "or fetch open net");
     delay(2000);
   }
 
@@ -127,37 +87,16 @@ void setup() {
 // MAIN LOOP
 // ==========================================
 void loop() {
+  logButtonStateChanges();
 
-  // --- CHECK SETUP BUTTON (long-press 3 seconds) ---
-  if (digitalRead(BTN_SETUP) == LOW) {
+  // --- CHECK SELECT BUTTON (long-press 3 seconds) ---
+  if (digitalRead(BTN_SELECT) == LOW) {
     unsigned long pressStart = millis();
-    while (digitalRead(BTN_SETUP) == LOW) {
+    while (digitalRead(BTN_SELECT) == LOW) {
+      logButtonStateChanges();
       if (millis() - pressStart > 3000) {
-        // Long press detected! Enter Admin Mode
-        beep(3);
-        showMessage("ADMIN ACCESS", "", "Scan Admin Card...");
-
-        // Wait for Admin Card scan (10 second timeout)
-        unsigned long timeout = millis();
-        String scanned = "";
-        while (millis() - timeout < 10000) {
-          scanned = readRFIDCard();
-          if (scanned != "")
-            break;
-          delay(50);
-        }
-
-        if (scanned == adminCardUID) {
-          beep(2);
-          enterAdminMenu();
-        } else if (scanned != "") {
-          showMessage("ACCESS DENIED", "", "Wrong Card!");
-          beep(1);
-          delay(2000);
-        } else {
-          showMessage("TIMEOUT", "", "No card scanned");
-          delay(1500);
-        }
+        // Long press detected! Enter Setup/Admin Mode
+        enterSetupAccess();
         resetScreen();
         return;
       }
@@ -166,7 +105,7 @@ void loop() {
   }
 
   // --- NORMAL SCAN MODE ---
-  if (WiFi.status() != WL_CONNECTED && savedSSID != "") {
+  if (WiFi.status() != WL_CONNECTED && wifiProfileCount > 0) {
     connectToWiFi();
   }
 
@@ -211,6 +150,7 @@ void firstBootSetup() {
   // Wait indefinitely for a card
   String uid = "";
   while (uid == "") {
+    logButtonStateChanges();
     uid = readRFIDCard();
     delay(50);
   }
@@ -225,10 +165,12 @@ void firstBootSetup() {
   delay(3000);
 
   // Ask to connect to WiFi now
-  showMessage("Setup WiFi?", "SELECT = Open Net", "SETUP = Skip");
+  showMessage("Setup WiFi?", "SELECT = Open Net", "BACK = Skip");
 
   unsigned long timeout = millis();
   while (millis() - timeout < 10000) {
+    logButtonStateChanges();
+
     if (digitalRead(BTN_SELECT) == LOW) {
       delay(200);
       connectToOpenNetwork();
@@ -252,6 +194,8 @@ void enterAdminMenu() {
   drawMenu();
 
   while (appMode == MODE_ADMIN_MENU) {
+    logButtonStateChanges();
+
     // UP button
     if (digitalRead(BTN_UP) == LOW) {
       menuIndex = (menuIndex - 1 + MENU_ITEMS) % MENU_ITEMS;
@@ -274,13 +218,41 @@ void enterAdminMenu() {
         drawMenu();
     }
 
-    // SETUP/BACK button (exit menu)
+    // BACK button (exit menu)
     if (digitalRead(BTN_SETUP) == LOW) {
       delay(200);
       appMode = MODE_NORMAL;
     }
 
     delay(50);
+  }
+}
+
+void enterSetupAccess() {
+  beep(3);
+  showMessage("SETUP ACCESS", "", "Scan Admin Card...");
+
+  // Wait for Admin Card scan (10 second timeout)
+  unsigned long timeout = millis();
+  String scanned = "";
+  while (millis() - timeout < 10000) {
+    logButtonStateChanges();
+    scanned = readRFIDCard();
+    if (scanned != "")
+      break;
+    delay(50);
+  }
+
+  if (scanned == adminCardUID) {
+    beep(2);
+    enterAdminMenu();
+  } else if (scanned != "") {
+    showMessage("ACCESS DENIED", "", "Wrong Card!");
+    beep(1);
+    delay(2000);
+  } else {
+    showMessage("TIMEOUT", "", "No card scanned");
+    delay(1500);
   }
 }
 
@@ -400,35 +372,28 @@ void fetchWiFiFromServer() {
   if (code == 200) {
     String resp = http.getString();
 
-    // Parse simple JSON like {"ssid":"MyNetwork","password":"MyPass123"}
-    int ssidStart = resp.indexOf("\"ssid\":\"") + 8;
-    int ssidEnd = resp.indexOf("\"", ssidStart);
-    int passStart = resp.indexOf("\"password\":\"") + 12;
-    int passEnd = resp.indexOf("\"", passStart);
+    WifiProfile fetchedProfiles[MAX_WIFI_PROFILES];
+    uint8_t fetchedCount = 0;
 
-    if (ssidStart > 8 && passStart > 12) {
-      savedSSID = resp.substring(ssidStart, ssidEnd);
-      savedPass = resp.substring(passStart, passEnd);
+    if (parseWifiProfilesResponse(resp, fetchedProfiles, fetchedCount)) {
+      saveWifiProfiles(prefs, fetchedProfiles, fetchedCount);
+      loadWifiProfiles(prefs, wifiProfiles, wifiProfileCount);
 
-      // Save permanently
-      prefs.putString("wifiSSID", savedSSID);
-      prefs.putString("wifiPass", savedPass);
-
-      showMessage("WiFi SAVED!", savedSSID, "Reconnecting...");
+      showMessage("WiFi SAVED!", String(wifiProfileCount) + " profile(s)",
+                  "Reconnecting...");
       beep(3);
       delay(1500);
 
-      // Reconnect to the new secure network
       WiFi.disconnect();
       delay(500);
       connectToWiFi();
     } else {
-      showMessage("PARSE ERROR", "Bad response", resp.substring(0, 20));
+      showMessage("PARSE ERROR", "Bad response", resp.substring(0, 30));
       delay(2000);
     }
   } else {
     showMessage("FETCH FAILED", "Code: " + String(code),
-                "Set WiFi in Dashboard");
+                "Check Dashboard API");
     delay(2000);
   }
 
@@ -439,20 +404,14 @@ void fetchWiFiFromServer() {
 // WIFI CONNECTIONS
 // ==========================================
 void connectToWiFi() {
-  showMessage("Connecting WiFi", savedSSID, "...");
-  Serial.println("Connecting to: " + savedSSID);
-
-  WiFi.begin(savedSSID.c_str(), savedPass.c_str());
-
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
+  if (wifiProfileCount == 0) {
+    showMessage("No WiFi profiles", "Push from Dashboard", "or fetch open net");
+    delay(2000);
+    return;
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi Connected! IP: " + WiFi.localIP().toString());
+  showMessage("Connecting WiFi", "Trying saved", "profiles...");
+  if (connectToSavedWifi(wifiProfiles, wifiProfileCount)) {
     showMessage("WiFi Connected!", WiFi.localIP().toString(), "");
     delay(1500);
   } else {
@@ -497,6 +456,8 @@ void connectToOpenNetwork() {
   int selected = 0;
 
   while (true) {
+    logButtonStateChanges();
+
     display.clearDisplay();
     display.setTextSize(1);
     display.setCursor(0, 0);
@@ -612,28 +573,6 @@ void sendScanToServer() {
   resetScreen();
 }
 
-// ==========================================
-// RFID CARD READER (Shared utility)
-// ==========================================
-String readRFIDCard() {
-  if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
-    return "";
-  }
-
-  String uid = "";
-  for (byte i = 0; i < mfrc522.uid.size; i++) {
-    uid += String(mfrc522.uid.uidByte[i] < 0x10 ? "0" : "");
-    uid += String(mfrc522.uid.uidByte[i], HEX);
-  }
-  uid.toUpperCase();
-
-  mfrc522.PICC_HaltA();
-  return uid;
-}
-
-// ==========================================
-// DISPLAY HELPERS
-// ==========================================
 void resetScreen() {
   display.clearDisplay();
   display.setTextSize(1);
@@ -645,33 +584,10 @@ void resetScreen() {
   display.println("Scan Tag");
   display.setTextSize(1);
   display.println("");
-  display.println("SETUP: Hold 3s=Admin");
+  display.println("SEL: Hold 3s=Setup");
   display.display();
 
   scanState = SCAN_FIRST;
   scannedID1 = "";
   scannedID2 = "";
-}
-
-void showMessage(String line1, String line2, String line3) {
-  display.clearDisplay();
-  display.setTextSize(1);
-
-  display.setCursor(0, 10);
-  display.println(line1);
-  display.println("");
-  display.println(line2);
-  display.println("");
-  display.println(line3);
-
-  display.display();
-}
-
-void beep(int times) {
-  for (int i = 0; i < times; i++) {
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(100);
-    digitalWrite(BUZZER_PIN, LOW);
-    delay(100);
-  }
 }

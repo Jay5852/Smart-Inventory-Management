@@ -20,18 +20,18 @@ This is the **single master reference** for ALL hardware wiring in this project.
 |-----------|-------------|--------|---------|
 | **3V3** | VCC | MFRC522 | ⚠️ Must be 3.3V, NOT 5V! |
 | **GND** | GND | ALL modules | Common ground |
-| **D5** | SCK | MFRC522 | SPI Clock |
-| **D27** | MISO | MFRC522 | SPI Data In |
-| **D26** | MOSI | MFRC522 | SPI Data Out |
-| **D14** | SDA (SS) | MFRC522 | SPI Chip Select |
-| **D33** | RST | MFRC522 | Reset |
+| **D18** | SCK | MFRC522 | SPI Clock |
+| **D17** | MISO | MFRC522 | SPI Data In |
+| **D23** | MOSI | MFRC522 | SPI Data Out |
+| **D19** | SDA (SS) | MFRC522 | SPI Chip Select |
+| **D16** | RST | MFRC522 | Reset |
 | **D21** | SDA | OLED | I2C Data |
 | **D22** | SCL | OLED | I2C Clock |
 | **D4** | (+) | Buzzer | Audio feedback |
-| **D12** | Leg 1 | UP Button | Menu UP (other leg → GND) |
-| **D13** | Leg 1 | DOWN Button | Menu DOWN (other leg → GND) |
-| **D2** | Leg 1 | SELECT Button | Confirm (other leg → GND) |
-| **D15** | Leg 1 | SETUP Button | Hold 3s = Admin Mode (other leg → GND) |
+| **D25** | Leg 1 | UP Button | Menu UP (other leg → GND) |
+| **D26** | Leg 1 | DOWN Button | Menu DOWN (other leg → GND) |
+| **D27** | Leg 1 | SELECT Button | Hold 3s = Setup/Admin Mode (other leg → GND) |
+| **D14** | Leg 1 | BACK Button | Exit/Cancel (other leg → GND) |
 
 ### Button Wiring Diagram
 ```
@@ -62,10 +62,10 @@ No external resistors needed. Code uses `INPUT_PULLUP`.
 |-----------|-------------|--------|---------|
 | **VIN (5V)** | VCC | NEO-6M | GPS power (needs 5V for stable lock) |
 | **GND** | GND | ALL modules | Common ground |
-| **D16 (RX2)** | TX | NEO-6M | GPS data → ESP32 |
-| **D17 (TX2)** | RX | NEO-6M | ESP32 → GPS (optional) |
-| **D14 (RX1)** | TXD | SIM800L | GSM data → ESP32 |
-| **D15 (TX1)** | RXD | SIM800L | ESP32 → GSM |
+| **D26 (RX2)** | TX | NEO-6M | GPS data → ESP32 |
+| **D27 (TX2)** | RX | NEO-6M | ESP32 → GPS (optional) |
+| **D33 (RX1)** | RXD | SIM800L | GSM data → ESP32 |
+| **D32 (TX1)** | TXD | SIM800L | ESP32 → GSM |
 
 ### ⚠️ SIM800L Power (CRITICAL!)
 **DO NOT power SIM800L from ESP32 pins!** It draws 2A peaks and will crash your ESP32.
@@ -98,12 +98,12 @@ Battery(-) ─── TP4056 B- ─── TP4056 OUT- ─── ESP32 GND
 
 ### Gate Reader ESP32
 ```
-Used:   D2, D4, D5, D12, D13, D14, D15, D21, D22, D26, D27, D33
-Free:   D0, D16, D17, D18, D19, D23, D25, D32, D34, D35
+Used:   D4, D14, D16, D17, D18, D19, D21, D22, D23, D25, D26, D27
+Free:   D0, D2, D5, D12, D13, D15, D32, D33, D34, D35
 ```
 
 ### GPS Tracker ESP32
 ```
-Used:   D14, D15, D16, D17, VIN
-Free:   D0, D2, D4, D5, D12, D13, D18, D19, D21, D22, D23, D25, D26, D27, D32, D33, D34, D35
+Used:   D26, D27, D32, D33, VIN
+Free:   D0, D2, D4, D5, D12, D13, D14, D15, D18, D19, D21, D22, D23, D25, D34, D35
 ```

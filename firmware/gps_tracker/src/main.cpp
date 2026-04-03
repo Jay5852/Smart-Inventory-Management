@@ -9,6 +9,7 @@
 // --- Tracking Configuration ---
 String TRACKER_ID = "COMP-ROUTER-001";
 const int UPDATE_INTERVAL_MS = 15000;
+const float MAX_ACCEPTABLE_HDOP = 5.0;
 
 // --- Networking Credentials ---
 const char *ssid = "AVI";
@@ -25,15 +26,17 @@ const char *serverPath = "/api/tracking";
 // --- Hardware Serial Definitions ---
 TinyGPSPlus gps;
 HardwareSerial gpsSerial(2);
-const int GPS_RX_PIN = 16;
-const int GPS_TX_PIN = 17;
+const int GPS_RX_PIN = 26;
+const int GPS_TX_PIN = 27;
 
 HardwareSerial gsmSerial(1);
-const int GSM_RX_PIN = 14;
-const int GSM_TX_PIN = 15;
+const int GSM_RX_PIN = 33;
+const int GSM_TX_PIN = 32;
 TinyGsm modem(gsmSerial);
 
 unsigned long lastSendTime = 0;
+unsigned long lastGpsDiagTime = 0;
+uint32_t gpsBytesSeen = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -67,8 +70,22 @@ void setup() {
 
 void loop() {
   // 1. Process GPS Data Continuously
+  uint16_t bytesReadThisLoop = 0;
   while (gpsSerial.available() > 0) {
     gps.encode(gpsSerial.read());
+    bytesReadThisLoop++;
+  }
+  gpsBytesSeen += bytesReadThisLoop;
+
+  if (millis() - lastGpsDiagTime > 3000) {
+    lastGpsDiagTime = millis();
+    Serial.printf("[GPS LINK] bytes_recent=%u total=%lu chars=%lu sentences=%lu valid=%s\n",
+                  bytesReadThisLoop, gpsBytesSeen, gps.charsProcessed(),
+                  gps.sentencesWithFix(), gps.location.isValid() ? "YES" : "NO");
+
+    if (gps.charsProcessed() < 10) {
+      Serial.println("[GPS LINK] No GPS serial data yet. Check TX/RX wiring, power, and baud (9600).");
+    }
   }
 
   // 2. Transmit Location Data at Intervals
@@ -81,7 +98,7 @@ void loop() {
       float hdop = gps.hdop.hdop();
 
       // [PHASE 2] GPS PRECISION FILTERING
-      if (hdop > 2.0) {
+      if (hdop > MAX_ACCEPTABLE_HDOP) {
         Serial.printf("❌ High GPS Error (HDOP: %.2f) - Ignoring reading\n",
                       hdop);
         return;

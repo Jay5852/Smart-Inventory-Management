@@ -19,11 +19,11 @@ The RFID reader uses the SPI protocol and requires **3.3V** power.
 |-------------|-----------|------|
 | **3.3V**    | **3V3**   | **DO NOT connect to 5V (VIN)! It will burn.** |
 | **GND**     | **GND**   | Ground |
-| **RST**     | **D33**   | Reset |
-| **MISO**    | **D27**   | SPI MISO |
-| **MOSI**    | **D26**   | SPI MOSI |
-| **SCK**     | **D5**    | SPI Clock |
-| **SDA (SS)**| **D14**   | SPI Chip Select |
+| **RST**     | **D16**   | Reset |
+| **MISO**    | **D17**   | SPI MISO |
+| **MOSI**    | **D23**   | SPI MOSI |
+| **SCK**     | **D18**   | SPI Clock |
+| **SDA (SS)**| **D19**   | SPI Chip Select |
 
 ### Step 2: Connect the I2C OLED Display
 The OLED module uses I2C communication and safely runs on 3.3V.
@@ -44,10 +44,10 @@ Each button connects between the ESP32 GPIO pin and **GND**. No external resisto
 
 | Button | ESP32 Pin | Function |
 |--------|-----------|----------|
-| **UP**     | **D12 (GPIO 12)** | Navigate menu UP |
-| **DOWN**   | **D13 (GPIO 13)** | Navigate menu DOWN |
-| **SELECT** | **D2 (GPIO 2)**   | Confirm / Enter |
-| **SETUP**  | **D15 (GPIO 15)** | Long-press 3s to enter Admin Mode / Back |
+| **UP**     | **D25 (GPIO 25)** | Navigate menu UP |
+| **DOWN**   | **D26 (GPIO 26)** | Navigate menu DOWN |
+| **SELECT** | **D27 (GPIO 27)** | Confirm / Enter, hold 3s for Setup/Admin |
+| **BACK**   | **D14 (GPIO 14)** | Back / Exit / Cancel |
 
 **Wiring for each button:**
 ```
@@ -69,18 +69,18 @@ ESP32 GND ───────────┘
 |-----------|-------------|---------|
 | **3V3**   | MFRC522 VCC, OLED VCC | Power (3.3V) |
 | **GND**   | Everything | Common Ground |
-| **D5**    | MFRC522 SCK | SPI Clock |
-| **D27**   | MFRC522 MISO | SPI Data |
-| **D26**   | MFRC522 MOSI | SPI Data |
-| **D14**   | MFRC522 SDA | SPI Chip Select |
-| **D33**   | MFRC522 RST | RFID Reset |
+| **D18**   | MFRC522 SCK | SPI Clock |
+| **D17**   | MFRC522 MISO | SPI Data |
+| **D23**   | MFRC522 MOSI | SPI Data |
+| **D19**   | MFRC522 SDA | SPI Chip Select |
+| **D16**   | MFRC522 RST | RFID Reset |
 | **D21**   | OLED SDA | I2C Data |
 | **D22**   | OLED SCL | I2C Clock |
 | **D4**    | Buzzer (+) | Audio Feedback |
-| **D12**   | UP Button | Menu Navigation |
-| **D13**   | DOWN Button | Menu Navigation |
-| **D2**    | SELECT Button | Confirm Action |
-| **D15**   | SETUP Button | Enter Admin Mode (long-press) / Back |
+| **D25**   | UP Button | Menu Navigation |
+| **D26**   | DOWN Button | Menu Navigation |
+| **D27**   | SELECT Button | Confirm Action / Hold 3s Setup |
+| **D14**   | BACK Button | Back / Exit / Cancel |
 
 ### Powering the Unit
 Plug the ESP32 into a standard USB phone charger or your laptop. Since it stays at the inventory room, it does not need a battery.

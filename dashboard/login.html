@@ -137,8 +137,6 @@
                 });
 
                 if (res.ok) {
-                    const data = await res.json();
-                    localStorage.setItem('adminToken', data.token);
                     window.location.href = '/';
                 } else {
                     showToast('Invalid credentials', 'alert');

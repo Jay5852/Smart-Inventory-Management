@@ -12,23 +12,48 @@ let playbackInterval = null;
 let geofenceViolationActive = false;
 const baseUrl = window.location.host === "" ? "http://localhost:3000" : "";
 
-// ==========================================
-// AUTHENTICATION CHECK
-// ==========================================
-if (!localStorage.getItem('adminToken')) {
-    window.location.href = '/login.html';
+const UI_TABLE_MESSAGES = {
+    inventoryEmpty: 'No assets found. Add a component to get started.',
+    inventoryError: 'Unable to load inventory right now.',
+    transactionsEmpty: 'No transactions yet.',
+    transactionsError: 'Unable to load transactions right now.',
+    logsEmpty: 'No logs found for selected filters.',
+    logsError: 'Unable to load transaction logs right now.'
+};
+
+function setTableLoading(tbodyId, cols = 4) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    tbody.innerHTML = `<tr class="table-loading-row"><td colspan="${cols}"><div class="table-loading">Loading data...</div></td></tr>`;
+}
+
+function setTableEmpty(tbodyId, message, cols = 4) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="${cols}" class="text-center empty-cell">${message}</td></tr>`;
+}
+
+function setFeedLoading() {
+    const feed = document.getElementById('activity-feed');
+    if (!feed) return;
+    feed.innerHTML = '<li class="empty-state loading-state">Loading latest RFID activity...</li>';
 }
 
 // ==========================================
 // INIT
 // ==========================================
 document.addEventListener("DOMContentLoaded", () => {
+    setFeedLoading();
+    setTableLoading('inventory-tbody', 6);
+    setTableLoading('transactions-tbody', 4);
+    setTableLoading('logs-tbody', 4);
+
     initMaps();
     fetchInventory();
     fetchTransactions();
-    loadRequestsData(); // Init Admin Approvals
     loadLogsData(); // Init Full Logs tab
     connectWebSocket();
+    loadWifiProfiles();
 
     // Default history date to today
     const today = new Date().toISOString().split('T')[0];
@@ -37,6 +62,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // Load employees into filter dropdown
     fetchEmployeesForFilter();
     fetchStaff(); // Init Staff Management tab
+
+    const commandTitle = document.getElementById('command-tab-title');
+    if (commandTitle) commandTitle.innerText = 'Admin Overview';
 });
 
 async function fetchEmployeesForFilter() {
@@ -139,16 +167,19 @@ function connectWebSocket() {
 
     const statusDot = document.querySelector('.status-indicator .dot');
     const statusText = document.getElementById('server-status');
+    const commandLive = document.getElementById('command-live-state');
 
     ws.onopen = () => {
         statusDot.classList.add('active');
         statusText.innerText = 'Connected Live';
+        if (commandLive) commandLive.innerText = 'Live sync connected';
         showToast('Connected to Server', 'info');
     };
 
     ws.onclose = () => {
         statusDot.classList.remove('active');
         statusText.innerText = 'Reconnecting...';
+        if (commandLive) commandLive.innerText = 'Reconnecting to live stream...';
         setTimeout(connectWebSocket, 3000);
     };
 
@@ -157,8 +188,7 @@ function connectWebSocket() {
 
         if (data.type === 'inventory_update') {
             logActivity(data);
-            fetchInventory();
-            fetchTransactions();
+            refreshLiveAdminData();
         }
         else if (data.type === 'gps_update') {
             updateLiveLocation(data);
@@ -166,11 +196,37 @@ function connectWebSocket() {
         else if (data.type === 'geofence_config') {
             updateGeofenceUI(data);
         }
+        else if (data.type === 'wifi_config_updated') {
+            loadWifiProfiles();
+            showToast(`WiFi profiles updated (${data.count || 0}).`, 'info');
+        }
         else if (data.type === 'new_request' || data.type === 'request_update') {
-            loadRequestsData();
+            loadRequestsDataSafely();
             if (data.type === 'new_request') showToast('New equipment checkout request received!', 'alert');
         }
     };
+}
+
+async function refreshLiveAdminData() {
+    await Promise.all([
+        fetchInventory(),
+        fetchTransactions(),
+        fetchStaff(),
+        fetchEmployeesForFilter(),
+        loadRequestsDataSafely()
+    ]);
+}
+
+async function loadRequestsDataSafely() {
+    const approvalsTbody = document.getElementById('approvals-tbody');
+    const historyTbody = document.getElementById('approvals-history-tbody');
+    const approvalBadge = document.getElementById('approval-badge');
+
+    if (!approvalsTbody || !historyTbody || !approvalBadge) {
+        return;
+    }
+
+    await loadRequestsData();
 }
 
 // ==========================================
@@ -492,6 +548,7 @@ async function loadAnalytics() {
 // INVENTORY & TRANSACTIONS
 // ==========================================
 async function fetchInventory() {
+    setTableLoading('inventory-tbody', 6);
     try {
         const response = await fetch(`${baseUrl}/api/inventory`);
         const data = await response.json();
@@ -500,6 +557,14 @@ async function fetchInventory() {
         let outCount = 0, inCount = 0;
         const tbody = document.getElementById('inventory-tbody');
         tbody.innerHTML = '';
+
+        if (data.components.length === 0) {
+            setTableEmpty('inventory-tbody', UI_TABLE_MESSAGES.inventoryEmpty, 6);
+            document.getElementById('stat-total').innerText = 0;
+            document.getElementById('stat-out').innerText = 0;
+            document.getElementById('stat-in').innerText = 0;
+            return;
+        }
 
         data.components.forEach(comp => {
             if (comp.status === 'OUT') outCount++;
@@ -524,6 +589,7 @@ async function fetchInventory() {
         document.getElementById('stat-in').innerText = inCount;
     } catch (e) {
         console.error("Error fetching inventory", e);
+        setTableEmpty('inventory-tbody', UI_TABLE_MESSAGES.inventoryError, 6);
     }
 }
 
@@ -627,6 +693,7 @@ async function deleteEmployee(uid) {
 }
 
 async function fetchTransactions() {
+    setTableLoading('transactions-tbody', 4);
     try {
         const res = await fetch(`${baseUrl}/api/transactions`);
         const data = await res.json();
@@ -634,7 +701,7 @@ async function fetchTransactions() {
         tbody.innerHTML = '';
 
         if (data.transactions.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center">No transactions yet</td></tr>';
+            setTableEmpty('transactions-tbody', UI_TABLE_MESSAGES.transactionsEmpty, 4);
             return;
         }
 
@@ -651,6 +718,7 @@ async function fetchTransactions() {
         });
     } catch (e) {
         console.error("Error fetching transactions", e);
+        setTableEmpty('transactions-tbody', UI_TABLE_MESSAGES.transactionsError, 4);
     }
 }
 
@@ -663,23 +731,56 @@ function logActivity(data) {
     if (emptyState) emptyState.remove();
 
     const li = document.createElement('li');
-    const isOut = data.action === 'OUT';
-    const iconClass = isOut ? 'out' : 'in';
-    const iconSvg = isOut ?
+    const isCheckOut = data.action === 'OUT';
+    const isCheckIn = data.action === 'IN';
+    const isAdminUpdate = !isCheckOut && !isCheckIn;
+    const iconClass = isCheckOut ? 'out' : (isCheckIn ? 'in' : 'info');
+    const iconSvg = isCheckOut ?
         `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>` :
-        `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>`;
+        (isCheckIn ?
+            `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>` :
+            `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>`);
     const time = new Date().toLocaleTimeString();
+
+    let headline = '';
+    let subtitle = '';
+
+    if (isCheckOut || isCheckIn) {
+        headline = `${data.employee || 'User'} Checked <strong>${data.action}</strong>`;
+        subtitle = `${data.component || 'Component'} • ${time}`;
+    } else if (data.action === 'component_added') {
+        headline = `Component added`;
+        subtitle = `${data.component || data.componentUid || 'Unknown component'} • ${time}`;
+    } else if (data.action === 'component_deleted') {
+        headline = `Component removed`;
+        subtitle = `${data.componentUid || 'Unknown component'} • ${time}`;
+    } else if (data.action === 'employee_added') {
+        headline = `Employee added`;
+        subtitle = `${data.employee || data.employeeUid || 'Unknown employee'} • ${time}`;
+    } else if (data.action === 'employee_deleted') {
+        headline = `Employee removed`;
+        subtitle = `${data.employeeUid || 'Unknown employee'} • ${time}`;
+    } else {
+        headline = `Dashboard updated`;
+        subtitle = `${time}`;
+    }
 
     li.innerHTML = `
         <div class="feed-icon ${iconClass}">${iconSvg}</div>
         <div class="feed-details">
-            <h4>${data.employee} Checked <strong>${data.action}</strong></h4>
-            <p>${data.component} • ${time}</p>
+            <h4>${headline}</h4>
+            <p>${subtitle}</p>
         </div>
     `;
     list.insertBefore(li, list.firstChild);
 
-    showToast(isOut ? `${data.employee} took ${data.component} to the field.` : `${data.employee} returned ${data.component}.`, 'info');
+    if (isCheckOut) {
+        showToast(`${data.employee} took ${data.component} to the field.`, 'info');
+    } else if (isCheckIn) {
+        showToast(`${data.employee} returned ${data.component}.`, 'info');
+    } else if (isAdminUpdate) {
+        showToast('Admin updated inventory.', 'info');
+    }
 }
 
 // ==========================================
@@ -766,6 +867,7 @@ async function handleRequest(reqId, action) {
 // TRANSACTION LOGS PAGE
 // ==========================================
 async function loadLogsData() {
+    setTableLoading('logs-tbody', 4);
     try {
         const dateFilter = document.getElementById('log-filter-date').value;
         const empFilter = document.getElementById('log-filter-emp').value;
@@ -782,7 +884,7 @@ async function loadLogsData() {
         tbody.innerHTML = '';
 
         if (data.transactions.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center">No logs found for these filters</td></tr>';
+            setTableEmpty('logs-tbody', UI_TABLE_MESSAGES.logsEmpty, 4);
             return;
         }
 
@@ -799,6 +901,7 @@ async function loadLogsData() {
         });
     } catch (e) {
         console.error("Error loading full logs", e);
+        setTableEmpty('logs-tbody', UI_TABLE_MESSAGES.logsError, 4);
     }
 }
 
@@ -820,6 +923,20 @@ function switchTab(tabName, el) {
     document.getElementById(`tab-${tabName}`).classList.add('active');
     if (el) el.classList.add('active');
 
+    const titleMap = {
+        overview: 'Admin Overview',
+        tracking: 'Live GPS Tracking',
+        history: 'History & Playback',
+        logs: 'Transaction Logs',
+        inventory: 'Inventory Control',
+        staff: 'Staff Management',
+        network: 'Network Settings'
+    };
+    const commandTitle = document.getElementById('command-tab-title');
+    if (commandTitle) {
+        commandTitle.innerText = titleMap[tabName] || 'Operations Console';
+    }
+
     // Fix Leaflet map rendering for newly visible tabs
     setTimeout(() => {
         if (tabName === 'overview') miniMap.invalidateSize();
@@ -835,9 +952,21 @@ function showToast(message, type) {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    const icon = type === 'alert' ? '⚠️' : 'ℹ️';
-    toast.innerHTML = `<span>${icon}</span> <div>${message}</div>`;
+    const iconMap = { alert: '⚠️', info: 'ℹ️', success: '✅' };
+    const icon = iconMap[type] || 'ℹ️';
+    toast.innerHTML = `
+        <span class="toast-icon">${icon}</span>
+        <div class="toast-content">${message}</div>
+        <button class="toast-close" aria-label="Close notification">✕</button>
+    `;
     container.appendChild(toast);
+
+    const closeBtn = toast.querySelector('.toast-close');
+    closeBtn.addEventListener('click', () => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 220);
+    });
+
     setTimeout(() => {
         toast.style.opacity = '0';
         setTimeout(() => toast.remove(), 300);
@@ -848,11 +977,14 @@ function showToast(message, type) {
 // NETWORK SETTINGS (OTA WiFi Provisioning)
 // ==========================================
 async function saveWifiConfig() {
-    const ssid = document.getElementById('wifi-ssid').value.trim();
-    const password = document.getElementById('wifi-password').value;
+    const rows = Array.from(document.querySelectorAll('.wifi-profile-row'));
+    const profiles = rows.map(row => ({
+        ssid: row.querySelector('.wifi-ssid').value.trim(),
+        password: row.querySelector('.wifi-password').value
+    })).filter(profile => profile.ssid.length > 0);
 
-    if (!ssid) {
-        showToast('Please enter a WiFi SSID', 'alert');
+    if (profiles.length === 0) {
+        showToast('Please enter at least one WiFi SSID', 'alert');
         return;
     }
 
@@ -860,14 +992,20 @@ async function saveWifiConfig() {
         const res = await fetch(`${baseUrl}/api/wifi-config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ssid, password })
+            body: JSON.stringify({ profiles })
         });
-        const data = await res.json();
+
+        const responseText = await res.text();
+        let data = {};
+        try {
+            data = responseText ? JSON.parse(responseText) : {};
+        } catch (parseError) {
+            data = { error: responseText };
+        }
 
         if (res.ok) {
-            showToast(`WiFi config saved: "${ssid}". Devices will fetch on next sync.`, 'info');
-            document.getElementById('wifi-ssid').value = '';
-            document.getElementById('wifi-password').value = '';
+            showToast(`Saved ${profiles.length} WiFi profile(s). Devices will fetch on next sync.`, 'info');
+            await loadWifiProfiles();
         } else {
             showToast(data.error || 'Failed to save WiFi config', 'alert');
         }
@@ -876,7 +1014,63 @@ async function saveWifiConfig() {
     }
 }
 
+function addWifiProfileRow(ssid = '', password = '') {
+    const container = document.getElementById('wifi-profiles-container');
+    if (!container) return;
+
+    const row = document.createElement('div');
+    row.className = 'wifi-profile-row';
+    row.style.cssText = 'display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; padding:12px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,0.02);';
+    row.innerHTML = `
+        <div style="flex:2; min-width:220px;">
+            <label style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">WiFi Network Name (SSID)</label>
+            <input type="text" class="wifi-ssid" value="${ssid.replace(/"/g, '&quot;')}" placeholder="e.g. MyCompanyWiFi" style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+        </div>
+        <div style="flex:2; min-width:220px;">
+            <label style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">WiFi Password</label>
+            <input type="password" class="wifi-password" value="${password.replace(/"/g, '&quot;')}" placeholder="Password" style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+        </div>
+        <button class="btn-secondary" type="button" onclick="removeWifiProfileRow(this)" style="padding:10px 16px; height:41px;">Remove</button>
+    `;
+
+    container.appendChild(row);
+}
+
+function removeWifiProfileRow(button) {
+    const row = button.closest('.wifi-profile-row');
+    const container = document.getElementById('wifi-profiles-container');
+    if (!row || !container) return;
+
+    if (container.querySelectorAll('.wifi-profile-row').length <= 1) {
+        row.querySelector('.wifi-ssid').value = '';
+        row.querySelector('.wifi-password').value = '';
+        return;
+    }
+
+    row.remove();
+}
+
+async function loadWifiProfiles() {
+    const container = document.getElementById('wifi-profiles-container');
+    if (!container) return;
+
+    try {
+        const res = await fetch(`${baseUrl}/api/wifi-config`);
+        const data = await res.json();
+        container.innerHTML = '';
+
+        if (Array.isArray(data.profiles) && data.profiles.length > 0) {
+            data.profiles.forEach(profile => addWifiProfileRow(profile.ssid || '', profile.password || ''));
+        } else {
+            addWifiProfileRow();
+        }
+    } catch (err) {
+        container.innerHTML = '';
+        addWifiProfileRow();
+        console.error('Failed to load WiFi profiles', err);
+    }
+}
+
 function logout() {
-    localStorage.removeItem('adminToken');
     window.location.href = '/login.html';
 }

@@ -120,24 +120,21 @@
                 <button class="btn-secondary" onclick="logout()">Logout</button>
             </div>
 
-            <h2>Available Equipment</h2>
-            <div class="component-grid" id="equipment-grid">
-                <!-- Loaded via JS -->
-            </div>
-
             <div class="my-requests">
-                <h2>My Pending Requests</h2>
-                <table class="data-table" style="margin-top:20px;">
+                <h2>🛠️ Tools Currently Checked Out By Me</h2>
+                <p style="color:var(--text-secondary); margin-bottom: 20px;">Return these tools to the inventory yard
+                    and scan them at the gate to check them back in.</p>
+                <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Equipment</th>
+                            <th>Tool Name</th>
+                            <th>Tool ID</th>
                             <th>Status</th>
-                            <th>Time</th>
                         </tr>
                     </thead>
-                    <tbody id="my-requests-tbody">
+                    <tbody id="my-tools-tbody">
                         <tr>
-                            <td colspan="3" class="text-center">No pending requests</td>
+                            <td colspan="3" class="text-center">Loading tools...</td>
                         </tr>
                     </tbody>
                 </table>

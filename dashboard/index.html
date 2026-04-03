@@ -45,6 +45,17 @@
                 History & Playback
             </a>
 
+            <a href="#" data-tab="approvals" onclick="switchTab('approvals', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                Admin Approvals
+            </a>
+
             <a href="#" data-tab="logs" onclick="switchTab('logs', this)">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="8" y1="6" x2="21" y2="6" />
@@ -134,9 +145,9 @@
                     <h3>Assets In Inventory</h3>
                     <div class="value" id="stat-in">0</div>
                 </div>
-                <div class="stat-card active-pulse">
-                    <h3>Distance from Zone</h3>
-                    <div class="value" id="stat-distance">—</div>
+                <div class="stat-card" style="border-left: 4px solid var(--danger);">
+                    <h3>Checkout Anomalies (>24hr)</h3>
+                    <div class="value" id="stat-anomalies" style="color: var(--danger);">0</div>
                 </div>
             </div>
             <div class="main-grid">
@@ -274,46 +285,52 @@
         </div>
 
         <!-- ============ ADMIN APPROVALS TAB ============ -->
-
-
-        <!-- ============ TRANSACTION LOGS TAB ============ -->
-        <div id="tab-logs" class="tab-content">
+        <div id="tab-approvals" class="tab-content">
             <header>
-                <h1>Transaction Logs</h1>
+                <h1>Admin Approvals</h1>
                 <div class="user-profile">
                     <div class="avatar">A</div><span>Administrator</span>
                 </div>
             </header>
-
-            <div class="history-controls">
-                <div class="control-group">
-                    <label>Filter by Date</label>
-                    <input type="date" id="log-filter-date">
+            <div class="card full-width mb-2">
+                <div class="card-header">
+                    <h2>Pending Requests</h2>
+                    <span class="badge" id="approval-badge">0 Pending</span>
                 </div>
-                <div class="control-group" style="min-width: 200px;">
-                    <label>Filter by Employee</label>
-                    <select id="log-filter-emp"
-                        style="width:100%; padding:10px 14px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:8px;">
-                        <option value="">All Employees</option>
-                    </select>
-                </div>
-                <button class="btn-primary" onclick="loadLogsData()">🔍 Search Logs</button>
-                <button class="btn-secondary" onclick="clearLogFilters()">Reset Filters</button>
-            </div>
-
-            <div class="card full-width">
                 <table class="data-table">
                     <thead>
                         <tr>
                             <th>Time</th>
-                            <th>Action</th>
-                            <th>Equipment</th>
                             <th>Employee</th>
+                            <th>Component</th>
+                            <th>Status</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="logs-tbody">
+                    <tbody id="approvals-tbody">
                         <tr>
-                            <td colspan="4" class="text-center">Loading logs...</td>
+                            <td colspan="5" class="text-center">No pending requests</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="card full-width mt-2">
+                <div class="card-header">
+                    <h2>Request History</h2>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Employee</th>
+                            <th>Component</th>
+                            <th>Result</th>
+                        </tr>
+                    </thead>
+                    <tbody id="approvals-history-tbody">
+                        <tr>
+                            <td colspan="4" class="text-center">No request history</td>
                         </tr>
                     </tbody>
                 </table>
@@ -337,12 +354,13 @@
                 <div class="control-group" style="min-width: 200px;">
                     <label>Filter by Employee</label>
                     <select id="log-filter-emp"
-                        style="width:100%; padding:10px 14px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:8px;">
+                        style="width:100%; padding:10px 14px; background:var(--card-bg-soft); border:1px solid var(--border); color:var(--text-primary); border-radius:8px;">
                         <option value="">All Employees</option>
                     </select>
                 </div>
                 <button class="btn-primary" onclick="loadLogsData()">🔍 Search Logs</button>
                 <button class="btn-secondary" onclick="clearLogFilters()">Reset Filters</button>
+                <button class="btn-secondary" onclick="exportTableToCSV('logs-tbody', 'transactions_report.csv')">📥 Export CSV</button>
             </div>
 
             <div class="card full-width">
@@ -374,7 +392,16 @@
             </header>
 
             <div class="card mb-2"
-                style="background:var(--bg-card); padding:20px; border-radius:12px; border:1px solid var(--border);">
+                style="background:var(--card-bg); padding:20px; border-radius:12px; border:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-direction:row;">
+                <div>
+                    <h3 style="margin-top:0; margin-bottom:5px; font-size:1.1rem;">📊 Inventory Data</h3>
+                    <p style="color:var(--text-secondary); font-size:0.9rem; margin:0;">Export your complete component inventory list for external auditing.</p>
+                </div>
+                <button class="btn-secondary" onclick="exportTableToCSV('inventory-tbody', 'inventory_report.csv')">📥 Export Inventory CSV</button>
+            </div>
+
+            <div class="card mb-2"
+                style="background:var(--card-bg); padding:20px; border-radius:12px; border:1px solid var(--border);">
                 <h3 style="margin-top:0; margin-bottom:15px; font-size:1.1rem;">➕ Register New Component</h3>
                 <div style="display:flex; gap:15px; align-items:flex-end;">
                     <div style="flex:1;">
@@ -382,21 +409,21 @@
                             style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">Component
                             Name</label>
                         <input type="text" id="add-comp-name" placeholder="e.g. Fluke Multimeter"
-                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                            style="width:100%; padding:10px; background:var(--card-bg-soft); border:1px solid var(--border); color:var(--text-primary); border-radius:6px;">
                     </div>
                     <div style="flex:1;">
                         <label
                             style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">RFID
                             Tag UID</label>
                         <input type="text" id="add-comp-uid" placeholder="Hex UID"
-                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                            style="width:100%; padding:10px; background:var(--card-bg-soft); border:1px solid var(--border); color:var(--text-primary); border-radius:6px;">
                     </div>
                     <div style="flex:1;">
                         <label
                             style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">GPS
                             Tracker ID (Optional)</label>
                         <input type="text" id="add-comp-tracker" placeholder="e.g. TRACK-001"
-                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                            style="width:100%; padding:10px; background:var(--card-bg-soft); border:1px solid var(--border); color:var(--text-primary); border-radius:6px;">
                     </div>
                     <button class="btn-primary" onclick="addComponent()" style="padding:10px 20px; height:41px;">Save
                         Component</button>
@@ -455,7 +482,16 @@
             </header>
 
             <div class="card mb-2"
-                style="background:var(--bg-card); padding:20px; border-radius:12px; border:1px solid var(--border);">
+                style="background:var(--card-bg); padding:20px; border-radius:12px; border:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-direction:row;">
+                <div>
+                    <h3 style="margin-top:0; margin-bottom:5px; font-size:1.1rem;">👥 Staff Records</h3>
+                    <p style="color:var(--text-secondary); font-size:0.9rem; margin:0;">Download a register of your currently enrolled staff members.</p>
+                </div>
+                <button class="btn-secondary" onclick="exportTableToCSV('staff-tbody', 'staff_report.csv')">📥 Export Staff CSV</button>
+            </div>
+            
+            <div class="card mb-2"
+                style="background:var(--card-bg); padding:20px; border-radius:12px; border:1px solid var(--border);">
                 <h3 style="margin-top:0; margin-bottom:15px; font-size:1.1rem;">➕ Register New Employee</h3>
                 <div style="display:flex; gap:15px; align-items:flex-end;">
                     <div style="flex:2;">
@@ -463,14 +499,14 @@
                             style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">Employee
                             Name</label>
                         <input type="text" id="add-emp-name" placeholder="Full Name"
-                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                            style="width:100%; padding:10px; background:var(--card-bg-soft); border:1px solid var(--border); color:var(--text-primary); border-radius:6px;">
                     </div>
                     <div style="flex:2;">
                         <label
                             style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">Staff
                             ID Card (RFID UID)</label>
                         <input type="text" id="add-emp-uid" placeholder="Hex UID"
-                            style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+                            style="width:100%; padding:10px; background:var(--card-bg-soft); border:1px solid var(--border); color:var(--text-primary); border-radius:6px;">
                     </div>
                     <button class="btn-primary" onclick="addEmployee()"
                         style="flex:1; padding:10px 20px; height:41px;">Save Employee</button>
@@ -503,9 +539,9 @@
                     open network.</p>
             </header>
 
-            <div class="card">
-                <h3>Device WiFi Configuration</h3>
-                <p style="color:var(--text-secondary); margin-bottom:15px;">Enter the WiFi network you want your Gate
+            <div class="card" style="padding: 24px;">
+                <h3 style="margin-top:0;">Device WiFi Configuration</h3>
+                <p style="color:var(--text-secondary); margin-bottom:15px; margin-top:10px;">Enter the WiFi network you want your Gate
                     Reader and GPS Tracker to connect to. Add one or more company WiFi profiles and the device will
                     store them in flash permanently.</p>
 
@@ -519,9 +555,9 @@
                 </div>
             </div>
 
-            <div class="card" style="margin-top:20px;">
-                <h3>How It Works</h3>
-                <ol style="color:var(--text-secondary); line-height:1.8;">
+            <div class="card" style="margin-top:20px; padding: 24px;">
+                <h3 style="margin-top:0;">How It Works</h3>
+                <ol style="color:var(--text-secondary); line-height:1.8; margin-top:15px; margin-left:20px;">
                     <li>Enter one or more WiFi SSID and Password pairs above and click <strong>Save</strong>.</li>
                     <li>On the ESP32 Gate Reader, hold the <strong>SELECT</strong> button for 3 seconds.</li>
                     <li>Scan the <strong>Admin Card</strong> to unlock the menu.</li>

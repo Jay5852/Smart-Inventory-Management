@@ -4,34 +4,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Login - Inventory Sys</title>
+    <title>Admin Login - SyncTrack Inventory</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <style>
         body {
             display: flex;
             align-items: center;
             justify-content: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
-            background: radial-gradient(circle at 10% 20%, rgb(14, 26, 64) 0%, rgb(0, 0, 0) 90%);
+            background-color: var(--bg-light);
+            background-image: radial-gradient(circle at 10% 20%, rgba(2, 132, 199, 0.05) 0%, transparent 90%);
+            color: var(--text-primary);
         }
 
         .login-card {
-            background: rgba(30, 41, 59, 0.7);
-            backdrop-filter: blur(12px);
+            background: var(--card-bg);
             padding: 40px;
             border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid var(--border);
             width: 100%;
-            max-width: 400px;
+            max-width: 420px;
             text-align: center;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         }
 
         .login-card h2 {
             margin-top: 0;
-            margin-bottom: 30px;
+            margin-bottom: 5px;
             font-weight: 600;
+        }
+
+        .login-subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 25px;
+            font-size: 0.95rem;
         }
 
         .input-group {
@@ -44,68 +52,98 @@
             margin-bottom: 8px;
             font-size: 0.9rem;
             color: var(--text-secondary);
+            font-weight: 500;
         }
 
         .input-group input {
             width: 100%;
             padding: 12px;
-            background: rgba(0, 0, 0, 0.3);
+            background: var(--card-bg-soft);
             border: 1px solid var(--border);
-            color: white;
+            color: var(--text-primary);
             border-radius: 8px;
             font-size: 1rem;
             box-sizing: border-box;
-            transition: border-color 0.2s;
+            transition: all 0.2s ease;
         }
 
         .input-group input:focus {
             border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.1);
             outline: none;
         }
 
         .btn-primary {
             width: 100%;
             padding: 12px;
-            font-size: 1.1rem;
+            font-size: 1.05rem;
             margin-top: 10px;
             cursor: pointer;
+            border-radius: 8px;
+            font-weight: 500;
         }
 
         .forgot-link {
             color: var(--text-secondary);
             text-decoration: none;
-            font-size: 0.85rem;
+            font-size: 0.9rem;
             display: inline-block;
-            margin-top: 20px;
             cursor: pointer;
-            transition: color 0.3s;
+            transition: color 0.2s;
         }
 
         .forgot-link:hover {
             color: var(--primary);
+        }
+
+        .hint-box {
+            background: rgba(2, 132, 199, 0.1);
+            border: 1px solid rgba(2, 132, 199, 0.3);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+            text-align: left;
         }
     </style>
 </head>
 
 <body>
     <div class="login-card">
-        <h2>Admin Authentication</h2>
+        <div style="display: flex; justify-content: center; margin-bottom: 15px;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+        </div>
+        <h2>Admin Gateway</h2>
+        <p class="login-subtitle">SyncTrack Inventory Management</p>
+        
+        <div class="hint-box">
+            <strong style="color: var(--primary);">💡 Connection Hint:</strong><br>
+            <span style="color: var(--text-secondary);">Username is <strong>admin</strong>. Default password can be anything (e.g. 1234).</span>
+        </div>
+
         <div class="input-group">
-            <label>Username</label>
-            <input type="text" id="username" placeholder="admin">
+            <label>Master Username</label>
+            <input type="text" id="username" placeholder="e.g. admin">
         </div>
         <div class="input-group">
-            <label>Password</label>
+            <label>Master Password</label>
             <input type="password" id="password" placeholder="••••••••">
         </div>
-        <button class="btn-primary" onclick="login()">Access Dashboard</button>
-        <a class="forgot-link" onclick="forgotPassword()">Forgot Password?</a>
+        
+        <button class="btn-primary" onclick="login()">Authenticate securely</button>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--border);">
+            <a href="home.html" style="color: var(--text-secondary); text-decoration: none; font-size: 0.9em;">&larr; Home</a>
+            <a class="forgot-link" href="/employee.html" style="color: var(--primary); font-weight: 500;">Go to Employee Portal &rarr;</a>
+        </div>
     </div>
 
     <div id="toast-container" class="toast-container"></div>
 
     <script>
-        const baseUrl = window.location.host === "" ? "http://localhost:3000" : "";
+        const baseUrl = (window.location.hostname === "localhost" && window.location.port === "3000") ? "" : "http://localhost:3000";
 
         function showToast(message, type) {
             const container = document.getElementById('toast-container');
@@ -121,7 +159,7 @@
         }
 
         async function login() {
-            const u = document.getElementById('username').value;
+            const u = document.getElementById('username').value.trim();
             const p = document.getElementById('password').value;
 
             if (!u || !p) {
@@ -137,24 +175,12 @@
                 });
 
                 if (res.ok) {
-                    window.location.href = '/';
+                    window.location.href = '/index.html';
                 } else {
-                    showToast('Invalid credentials', 'alert');
+                    showToast('Invalid credentials provided.', 'alert');
                 }
             } catch (e) {
-                showToast('Connection error', 'alert');
-            }
-        }
-
-        function forgotPassword() {
-            const recoveryKey = prompt("PASSWORD RECOVERY\n\nPlease enter your 16-digit Emergency Recovery Key provided by IT Support.");
-
-            if (recoveryKey) {
-                if (recoveryKey.length >= 10) {
-                    showToast("Recovery key accepted. Admin password has been sent to your registered email.", "info");
-                } else {
-                    showToast("Invalid recovery key.", "alert");
-                }
+                showToast('Network connection error. Check server logs.', 'alert');
             }
         }
 

@@ -10,7 +10,8 @@ let fullTrailPolyline = null;
 let historyPolyline = null;
 let playbackInterval = null;
 let geofenceViolationActive = false;
-const baseUrl = window.location.host === "" ? "http://localhost:3000" : "";
+const baseUrl = (window.location.hostname === "localhost" && window.location.port === "3000") ? "" : "http://localhost:3000";
+let commandInterval;
 
 const UI_TABLE_MESSAGES = {
     inventoryEmpty: 'No assets found. Add a component to get started.',
@@ -162,7 +163,8 @@ function initMaps() {
 // ==========================================
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = window.location.host === "" ? "ws://localhost:3000" : `${protocol}//${window.location.host}`;
+    const isPrimaryServer = window.location.hostname === "localhost" && window.location.port === "3000";
+    const wsUrl = isPrimaryServer ? `${protocol}//${window.location.host}` : "ws://localhost:3000";
     const ws = new WebSocket(wsUrl);
 
     const statusDot = document.querySelector('.status-indicator .dot');
@@ -406,7 +408,7 @@ async function loadHistory() {
     }
 
     try {
-        const res = await fetch(`${baseUrl}/api/tracking/history?trackerId=COMP-ROUTER-001&date=${date}`);
+        const res = await fetch(`${baseUrl}/api/tracking/history?trackerId=COMP-SPLICER-001&date=${date}`);
         const data = await res.json();
         historyData = data.locations;
 
@@ -512,7 +514,7 @@ function stopPlayback() {
 // ==========================================
 async function loadAnalytics() {
     try {
-        const res = await fetch(`${baseUrl}/api/tracking/analytics?trackerId=COMP-ROUTER-001`);
+        const res = await fetch(`${baseUrl}/api/tracking/analytics?trackerId=COMP-SPLICER-001`);
         const data = await res.json();
         const tbody = document.getElementById('analytics-tbody');
         tbody.innerHTML = '';
@@ -587,6 +589,10 @@ async function fetchInventory() {
         document.getElementById('stat-total').innerText = total;
         document.getElementById('stat-out').innerText = outCount;
         document.getElementById('stat-in').innerText = inCount;
+        
+        // Calculate Anomalies (Mock for Project Demonstration: 1 anomaly if any items out)
+        const anomaliesEl = document.getElementById('stat-anomalies');
+        if (anomaliesEl) anomaliesEl.innerText = outCount > 0 ? 1 : 0;
     } catch (e) {
         console.error("Error fetching inventory", e);
         setTableEmpty('inventory-tbody', UI_TABLE_MESSAGES.inventoryError, 6);
@@ -1020,15 +1026,15 @@ function addWifiProfileRow(ssid = '', password = '') {
 
     const row = document.createElement('div');
     row.className = 'wifi-profile-row';
-    row.style.cssText = 'display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; padding:12px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,0.02);';
+    row.style.cssText = 'display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; padding:12px; border:1px solid var(--border); border-radius:10px; background:rgba(0,0,0,0.02);';
     row.innerHTML = `
         <div style="flex:2; min-width:220px;">
             <label style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">WiFi Network Name (SSID)</label>
-            <input type="text" class="wifi-ssid" value="${ssid.replace(/"/g, '&quot;')}" placeholder="e.g. MyCompanyWiFi" style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+            <input type="text" class="wifi-ssid" value="${ssid.replace(/"/g, '&quot;')}" placeholder="e.g. MyCompanyWiFi" style="width:100%; padding:10px; background:var(--card-bg-soft); border:1px solid var(--border); color:var(--text-primary); border-radius:6px;">
         </div>
         <div style="flex:2; min-width:220px;">
             <label style="display:block; margin-bottom:5px; font-size:0.85rem; color:var(--text-secondary);">WiFi Password</label>
-            <input type="password" class="wifi-password" value="${password.replace(/"/g, '&quot;')}" placeholder="Password" style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
+            <input type="password" class="wifi-password" value="${password.replace(/"/g, '&quot;')}" placeholder="Password" style="width:100%; padding:10px; background:var(--card-bg-soft); border:1px solid var(--border); color:var(--text-primary); border-radius:6px;">
         </div>
         <button class="btn-secondary" type="button" onclick="removeWifiProfileRow(this)" style="padding:10px 16px; height:41px;">Remove</button>
     `;
@@ -1073,4 +1079,34 @@ async function loadWifiProfiles() {
 
 function logout() {
     window.location.href = '/login.html';
+}
+
+function exportTableToCSV(tbodyId, filename) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    const rows = tbody.querySelectorAll('tr');
+    let csv = [];
+    const table = tbody.closest('table');
+    if (table) {
+        const headers = Array.from(table.querySelectorAll('thead th')).map(th => `"${th.innerText.replace(/"/g, '""')}"`);
+        csv.push(headers.join(','));
+    }
+
+    rows.forEach(row => {
+        const cols = row.querySelectorAll('td, th');
+        const rowData = Array.from(cols).map(col => {
+            let text = col.innerText.replace(/"/g, '""');
+            return `"${text}"`;
+        });
+        csv.push(rowData.join(','));
+    });
+
+    const csvFile = new Blob([csv.join('\n')], { type: "text/csv" });
+    const downloadLink = document.createElement("a");
+    downloadLink.download = filename;
+    downloadLink.href = window.URL.createObjectURL(csvFile);
+    downloadLink.style.display = "none";
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
 }

@@ -93,8 +93,16 @@ const db = new sqlite3.Database(dbPath, (err) => {
             db.get("SELECT COUNT(*) as count FROM components", (err, row) => {
                 if (row && row.count === 0) {
                     console.log("Inserting components...");
-                    db.run(`INSERT INTO components (uid, tracker_id, name) VALUES ('D6F87C05', 'COMP-ROUTER-001', 'Cisco Router ASR-1000')`);
-                    db.run(`INSERT INTO components (uid, tracker_id, name) VALUES ('55667788', 'COMP-SWITCH-002', 'Juniper Switch EX4300')`);
+                    db.run(`INSERT INTO components (uid, tracker_id, name) VALUES ('D6F87C05', 'COMP-SPLICER-001', 'Splicing machine')`);
+                    db.run(`INSERT INTO components (uid, name) VALUES ('A1B2C3D4', 'OTDR')`);
+                    db.run(`INSERT INTO components (uid, name) VALUES ('B2C3D4E5', 'Blue Patchcord')`);
+                    db.run(`INSERT INTO components (uid, name) VALUES ('C3D4E5F6', 'Green Patchcord')`);
+                    db.run(`INSERT INTO components (uid, name) VALUES ('D4E5F6A7', 'Small closer')`);
+                    db.run(`INSERT INTO components (uid, name) VALUES ('E5F6A7B8', 'big closer')`);
+                    db.run(`INSERT INTO components (uid, name) VALUES ('F6A7B8C9', 'Sleev packets')`);
+                    db.run(`INSERT INTO components (uid, name) VALUES ('1234ABCD', 'ONU')`);
+                    db.run(`INSERT INTO components (uid, name) VALUES ('2345BCDE', 'Router')`);
+                    db.run(`INSERT INTO components (uid, name) VALUES ('3456CDEF', 'Splitter')`);
                 }
             });
 

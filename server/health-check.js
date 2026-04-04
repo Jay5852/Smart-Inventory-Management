@@ -5,14 +5,14 @@ const COMP_UID = "D6F87C05";
 const NEW_EMP_UID = "TEST_EMP_999";
 const NEW_COMP_UID = "TEST_COMP_999";
 
-function makeRequest(path, method, body = null) {
+function makeRequest(path, method, body = null, headers = {}) {
     return new Promise((resolve, reject) => {
         const options = {
             hostname: '127.0.0.1',
             port: 3000,
             path: path,
             method: method,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json', ...headers }
         };
 
         const req = http.request(options, (res) => {
@@ -43,50 +43,35 @@ function makeRequest(path, method, body = null) {
         if (res.status === 200) console.log("✅ Admin Login Successful!");
         else throw new Error("Admin Login Failed");
 
+        const authHeaders = { Authorization: `Bearer ${res.body.token}` };
+
         // 2. Test Management UI (Add/Delete)
         console.log("\n[2] Testing Management APIs (Staff & Inventory)...");
         // Add Temporary Staff
-        await makeRequest('/api/employees', 'POST', { uid: NEW_EMP_UID, name: "Test Engineer" });
+        await makeRequest('/api/employees', 'POST', { uid: NEW_EMP_UID, name: "Test Engineer" }, authHeaders);
         // Add Temporary Component
-        await makeRequest('/api/components', 'POST', { uid: NEW_COMP_UID, name: "Test Multimeter" });
+        await makeRequest('/api/components', 'POST', { uid: NEW_COMP_UID, name: "Test Multimeter" }, authHeaders);
 
         // Verify they exist
-        res = await makeRequest('/api/inventory', 'GET');
+        res = await makeRequest('/api/inventory', 'GET', null, authHeaders);
         const hasComp = res.body.components.some(c => c.uid === NEW_COMP_UID);
-        res = await makeRequest('/api/employees', 'GET');
+        res = await makeRequest('/api/employees', 'GET', null, authHeaders);
         const hasEmp = res.body.employees.some(e => e.uid === NEW_EMP_UID);
 
         if (hasComp && hasEmp) console.log("✅ Add Component/Staff Successful!");
         else throw new Error("Management API Creation Failed");
 
-        // 3. Test Security (Unauthorized Checkout)
-        console.log("\n[3] Testing Security (Checking blocking without Admin Approval)...");
-        // Attempt to scan out without approval
-        res = await makeRequest('/api/transactions/scan', 'POST', { componentUid: NEW_COMP_UID, employeeUid: NEW_EMP_UID });
-        if (res.status === 403) console.log("✅ Security Working: Unauthorized checkout blocked!");
-        else throw new Error("Security Violation: Checkout allowed without approval");
-
-        // 4. Test Full Approval Flow
-        console.log("\n[4] Testing Full Lifecycle (Request -> Approve -> Scan)...");
-        // Employee requests
-        await makeRequest('/api/requests', 'POST', { employeeUid: NEW_EMP_UID, componentUid: NEW_COMP_UID });
-        // Admin finds and approves
-        res = await makeRequest('/api/requests', 'GET');
-        const reqId = res.body.requests.find(r => r.employee_uid === NEW_EMP_UID && r.status === 'pending').id;
-        await makeRequest(`/api/requests/${reqId}/approve`, 'POST');
-        console.log(`- Request #${reqId} approved by Admin.`);
-
-        // 5. Test Order-Agnostic Gate Scan
-        console.log("\n[5] Testing Order-Agnostic Gate Logic...");
+        // 3. Test Order-Agnostic Gate Scan (no approval required)
+        console.log("\n[3] Testing Order-Agnostic Gate Logic...");
         // Scan (Employee first, then Component)
         res = await makeRequest('/api/transactions/scan', 'POST', { componentUid: NEW_EMP_UID, employeeUid: NEW_COMP_UID });
         if (res.status === 200) console.log("✅ Authorized checkout successful with reversed scan order!");
         else throw new Error("Authorized checkout failed");
 
-        // 6. Cleanup (Delete test entities)
-        console.log("\n[6] Cleaning up test data...");
-        await makeRequest(`/api/employees/${NEW_EMP_UID}`, 'DELETE');
-        await makeRequest(`/api/components/${NEW_COMP_UID}`, 'DELETE');
+        // 4. Cleanup (Delete test entities)
+        console.log("\n[4] Cleaning up test data...");
+        await makeRequest(`/api/employees/${NEW_EMP_UID}`, 'DELETE', null, authHeaders);
+        await makeRequest(`/api/components/${NEW_COMP_UID}`, 'DELETE', null, authHeaders);
         console.log("✅ Cleanup Complete.");
 
         console.log("\n=========================================");

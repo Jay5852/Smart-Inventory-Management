@@ -56,6 +56,15 @@ const db = new sqlite3.Database(dbPath, (err) => {
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )`);
 
+            // WiFi Profiles (OTA provisioning)
+            db.run(`CREATE TABLE IF NOT EXISTS wifi_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ssid TEXT NOT NULL,
+                password TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`);
+
             // Users (RBAC foundation)
             db.run(`CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,16 +94,15 @@ const db = new sqlite3.Database(dbPath, (err) => {
             db.get("SELECT COUNT(*) as count FROM employees", (err, row) => {
                 if (row && row.count === 0) {
                     console.log("Inserting employees...");
-                    db.run(`INSERT INTO employees (uid, name) VALUES ('2458CA2B', 'Employee 1')`);
-                    db.run(`INSERT INTO employees (uid, name) VALUES ('BDD0D316', 'Employee 2')`);
+                    db.run(`INSERT INTO employees (uid, name) VALUES ('BDD0D316', 'Admin')`);
+                    db.run(`INSERT INTO employees (uid, name) VALUES ('2458CA2B', 'Employee')`);
                 }
             });
 
             db.get("SELECT COUNT(*) as count FROM components", (err, row) => {
                 if (row && row.count === 0) {
                     console.log("Inserting components...");
-                    db.run(`INSERT INTO components (uid, tracker_id, name) VALUES ('D6F87C05', 'COMP-ROUTER-001', 'Cisco Router ASR-1000')`);
-                    db.run(`INSERT INTO components (uid, tracker_id, name) VALUES ('55667788', 'COMP-SWITCH-002', 'Juniper Switch EX4300')`);
+                    db.run(`INSERT INTO components (uid, tracker_id, name) VALUES ('D6F87C05', 'COMP-ROUTER-001', 'Main Router')`);
                 }
             });
 

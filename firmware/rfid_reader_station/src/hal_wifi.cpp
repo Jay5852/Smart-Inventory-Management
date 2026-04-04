@@ -87,6 +87,7 @@ bool connectToSavedWifi(const WifiProfile profiles[], uint8_t count) {
   }
 
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
 
   for (uint8_t i = 0; i < count; i++) {
     if (profiles[i].ssid.length() == 0) {

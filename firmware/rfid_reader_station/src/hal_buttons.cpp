@@ -4,6 +4,7 @@ static bool lastBtnUpState = HIGH;
 static bool lastBtnDownState = HIGH;
 static bool lastBtnSelectState = HIGH;
 static bool lastBtnSetupState = HIGH;
+static unsigned long lastBtnEventMs[4] = {0, 0, 0, 0};
 
 void initButtons() {
   pinMode(BTN_UP, INPUT_PULLUP);
@@ -12,7 +13,7 @@ void initButtons() {
   pinMode(BTN_SETUP, INPUT_PULLUP);
   syncButtonStates();
 
-  Serial.println("Button diagnostics ready. Press buttons to see serial logs.");
+  Serial.println("Button diagnostics ready. Buttons must connect GPIO to GND when pressed.");
 }
 
 void syncButtonStates() {
@@ -34,18 +35,16 @@ void logButtonStateChanges() {
                           {"SELECT", BTN_SELECT, &lastBtnSelectState},
                           {"BACK", BTN_SETUP, &lastBtnSetupState}};
 
-  for (auto &button : buttons) {
+  for (int i = 0; i < 4; i++) {
+    auto &button = buttons[i];
     bool currentState = digitalRead(button.pin);
 
-    if (currentState != *button.lastState) {
-      delay(20);
-      currentState = digitalRead(button.pin);
-
-      if (currentState != *button.lastState) {
-        *button.lastState = currentState;
-        Serial.println(String("[BUTTON] ") + button.name +
-                       (currentState == LOW ? " PRESSED" : " RELEASED"));
-      }
+    if (currentState != *button.lastState &&
+        millis() - lastBtnEventMs[i] >= 30) {
+      *button.lastState = currentState;
+      lastBtnEventMs[i] = millis();
+      Serial.println(String("[BUTTON] ") + button.name +
+                     (currentState == LOW ? " PRESSED" : " RELEASED"));
     }
   }
 }

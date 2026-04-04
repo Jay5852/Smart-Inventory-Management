@@ -5,13 +5,14 @@ An intelligent RFID-based inventory management system with real-time GPS compone
 ## Features
 
 - **RFID Check-In/Out:** Dual-card scanning at the gate (order-agnostic)
-- **Admin Approval Workflow:** Employees request items; admin approves before gate unlocks
+- **Role-Based Dashboard:** Operator, manager, and admin see different actions
 - **Live GPS Tracking:** Real-time map with breadcrumb trails and geofencing alerts
 - **Dual-Mode Connectivity:** WiFi + SIM800L GPRS cellular fallback
 - **Hardware Admin Mode (GFM):** On-device OLED menu with 4 pushbuttons for card enrollment and WiFi setup
 - **First Boot Setup:** Phone-style initial configuration for Master Admin card
 - **OTA WiFi Provisioning:** ESP32 fetches secure WiFi credentials from the Dashboard over an open network
 - **Secure Dashboard:** Admin login with role-based access control
+- **Device Health & Asset Reports:** Manager/admin reporting for trackers and assets
 
 ## Tech Stack
 
@@ -32,6 +33,7 @@ An intelligent RFID-based inventory management system with real-time GPS compone
 │   ├── server.js               # Express + WebSocket backend
 │   └── db.js                   # SQLite database setup
 ├── dashboard/
+│   ├── home.html              # Public landing page with admin + employee portals
 │   ├── index.html              # Admin Dashboard
 │   ├── login.html              # Secure login page
 │   ├── employee.html           # Employee request portal
@@ -40,7 +42,13 @@ An intelligent RFID-based inventory management system with real-time GPS compone
 └── docs/
     ├── hardware_connections.md  # Complete wiring guide
     ├── rfid_receiver_hardware.md
-    └── gps_transmitter_hardware.md
+    ├── gps_transmitter_hardware.md
+    ├── project_guide.md
+    ├── project_config_map.md
+    └── friend_handoff.md
+
+└── config/
+    └── project-settings.example.json
 ```
 
 ## Quick Start
@@ -55,9 +63,25 @@ An intelligent RFID-based inventory management system with real-time GPS compone
    ```
 4. **Open Dashboard:** http://localhost:3000 (Login: `admin` / `admin`)
 
+## Configuration
+
+If you move the project to another PC or Wi-Fi network, start with:
+- `config/project-settings.example.json`
+- `docs/project_config_map.md`
+
+Those files list the server IP, Wi-Fi values, tracker ID, and default card UIDs that must stay in sync.
+
+## User Guide
+
+See `docs/project_guide.md` for the full role guide, setup flow, and troubleshooting notes.
+
 ## Hardware
 
 See [docs/hardware_connections.md](docs/hardware_connections.md) for complete wiring diagrams.
+
+## Notes
+
+- The old approval workflow is still present in the backend as a legacy path, but the dashboard is now role-gated around the current stable workflow.
 
 ## License
 

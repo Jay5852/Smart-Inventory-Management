@@ -1,0 +1,41 @@
+{
+  "projectName": "Smart Inventory Management",
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3000,
+    "baseUrl": "http://192.168.0.167:3000"
+  },
+  "dashboard": {
+    "loginUrl": "http://localhost:3000/login.html",
+    "defaultAdminUsername": "admin",
+    "defaultAdminPassword": "admin",
+    "defaultManagerUsername": "manager",
+    "defaultManagerPassword": "manager"
+  },
+  "rfidReaderFirmware": {
+    "serverIp": "192.168.0.167",
+    "serverPort": 3000,
+    "wifiBootstrapNote": "Use the dashboard Wi-Fi profiles and the gate reader Wi-Fi menu"
+  },
+  "gpsTrackerFirmware": {
+    "trackerId": "COMP-ROUTER-001",
+    "ssid": "Jay",
+    "password": "12345678",
+    "serverHost": "192.168.0.167",
+    "serverPort": 3000
+  },
+  "defaultDatabaseRecords": {
+    "employees": [
+      { "uid": "BDD0D316", "name": "Admin" },
+      { "uid": "2458CA2B", "name": "Employee" }
+    ],
+    "components": [
+      { "uid": "D6F87C05", "trackerId": "COMP-ROUTER-001", "name": "Main Router" }
+    ]
+  },
+  "notes": [
+    "Update every IP here first, then sync the matching values in the firmware and dashboard files.",
+    "The dashboard and server are still the source of truth for live role permissions and runtime data.",
+    "If the repo is moved to another Wi-Fi or PC, only these values should change first."
+  ]
+}

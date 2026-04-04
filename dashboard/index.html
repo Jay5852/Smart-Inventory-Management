@@ -45,6 +45,23 @@
                 History & Playback
             </a>
 
+            <!-- Device Health and Asset Reports removed for operators. Only visible for manager/admin in JS. -->
+            <a href="#" data-tab="device-health" data-role-min="manager" onclick="switchTab('device-health', this)" style="display:none">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 12h4l3 7 4-14 3 7h4" />
+                    <path d="M5 5h14" />
+                </svg>
+                Device Health
+            </a>
+            <a href="#" data-tab="reports" data-role-min="manager" onclick="switchTab('reports', this)" style="display:none">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 19h16" />
+                    <path d="M5 15l4-4 3 3 5-7" />
+                    <path d="M19 8V4h-4" />
+                </svg>
+                Asset Reports
+            </a>
+
             <a href="#" data-tab="logs" onclick="switchTab('logs', this)">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="8" y1="6" x2="21" y2="6" />
@@ -55,6 +72,14 @@
                     <line x1="3" y1="18" x2="3.01" y2="18" />
                 </svg>
                 Transaction Logs
+            </a>
+            <!-- Audit Trail only visible for admin in JS. -->
+            <a href="#" data-tab="audit" data-role-min="admin" onclick="switchTab('audit', this)" style="display:none">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 11l3 3L22 4" />
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg>
+                Audit Trail
             </a>
             <a href="#" data-tab="inventory" onclick="switchTab('inventory', this)">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -105,12 +130,21 @@
                 <h2 id="command-tab-title">Admin Overview</h2>
             </div>
             <div class="command-actions">
+                <span class="command-user" id="command-user-role">User: —</span>
                 <span class="command-live" id="command-live-state">Live sync pending...</span>
                 <button class="btn-secondary" onclick="refreshLiveAdminData()">Refresh Data</button>
                 <button class="btn-secondary"
-                    onclick="switchTab('tracking', document.querySelector('nav a[data-tab=\'tracking\']'))">Go Live Tracking</button>
-                <button class="btn-primary"
-                    onclick="switchTab('network', document.querySelector('nav a[data-tab=\'network\']'))">Open Network Settings</button>
+                    onclick="switchTab('tracking', document.querySelector('nav a[data-tab=\'tracking\']'))">Go Live
+                    Tracking</button>
+                <button class="btn-secondary" data-role-min="manager"
+                    onclick="switchTab('device-health', document.querySelector('nav a[data-tab=\'device-health\']'))">Open
+                    Device Health</button>
+                <button class="btn-secondary" data-role-min="manager"
+                    onclick="switchTab('reports', document.querySelector('nav a[data-tab=\'reports\']'))">Open Asset
+                    Reports</button>
+                <button class="btn-primary" data-role-min="manager"
+                    onclick="switchTab('network', document.querySelector('nav a[data-tab=\'network\']'))">Open Network
+                    Settings</button>
             </div>
         </div>
         <!-- ============ OVERVIEW TAB ============ -->
@@ -166,6 +200,122 @@
             </div>
         </div>
 
+        <!-- ============ ASSET REPORTS TAB ============ -->
+        <div id="tab-reports" class="tab-content">
+            <header>
+                <h1>Asset Timeline & Reports</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+
+            <div class="history-controls">
+                <div class="control-group" style="min-width: 280px; flex: 1;">
+                    <label>Select Component</label>
+                    <select id="asset-report-component"
+                        style="width:100%; padding:10px 14px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:8px;"></select>
+                </div>
+                <div class="control-group">
+                    <label>From Date</label>
+                    <input type="date" id="asset-report-from">
+                </div>
+                <div class="control-group">
+                    <label>To Date</label>
+                    <input type="date" id="asset-report-to">
+                </div>
+                <button class="btn-primary" data-role-min="manager" onclick="loadAssetReport(true)">Load Report</button>
+                <button class="btn-secondary" data-role-min="manager" onclick="toggleReportMode()">Toggle GPS
+                    Only</button>
+            </div>
+
+            <div class="stats-grid report-stats-grid">
+                <div class="stat-card">
+                    <h3>Total Events</h3>
+                    <div class="value" id="report-total-events">0</div>
+                </div>
+                <div class="stat-card success">
+                    <h3>Transactions</h3>
+                    <div class="value" id="report-transactions">0</div>
+                </div>
+                <div class="stat-card warning">
+                    <h3>GPS Points</h3>
+                    <div class="value" id="report-gps-points">0</div>
+                </div>
+                <div class="stat-card active-pulse">
+                    <h3>Current Status</h3>
+                    <div class="value" id="report-status">—</div>
+                </div>
+            </div>
+
+            <div class="card full-width mt-2">
+                <div class="card-header">
+                    <h2>Asset Timeline</h2>
+                    <span class="badge" id="report-meta-badge">Awaiting selection</span>
+                </div>
+                <div class="timeline-container" id="asset-timeline-container">
+                    <div class="timeline-empty">Select a component and load its report.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ DEVICE HEALTH TAB ============ -->
+        <div id="tab-device-health" class="tab-content">
+            <header>
+                <h1>Device Health</h1>
+                <div class="user-profile">
+                    <div class="avatar">A</div><span>Administrator</span>
+                </div>
+            </header>
+
+            <div class="stats-grid device-health-stats">
+                <div class="stat-card success">
+                    <h3>Online Devices</h3>
+                    <div class="value" id="health-online">0</div>
+                </div>
+                <div class="stat-card warning">
+                    <h3>Stale Devices</h3>
+                    <div class="value" id="health-stale">0</div>
+                </div>
+                <div class="stat-card active-pulse">
+                    <h3>Offline Devices</h3>
+                    <div class="value" id="health-offline">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Firmware Mix</h3>
+                    <div class="value" id="health-firmware">—</div>
+                </div>
+            </div>
+
+            <div class="history-controls">
+                <button class="btn-primary" data-role-min="manager" onclick="loadDeviceHealth(true)">Refresh
+                    Health</button>
+                <button class="btn-secondary" data-role-min="manager" onclick="toggleOfflineOnly()">Toggle Offline
+                    Only</button>
+                <span class="command-label" id="device-health-summary" style="margin-left:auto;">Loading device
+                    health...</span>
+            </div>
+
+            <div class="card full-width">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>Tracker</th>
+                            <th>Firmware</th>
+                            <th>Last Seen</th>
+                            <th>Signal</th>
+                            <th>Location</th>
+                        </tr>
+                    </thead>
+                    <tbody id="device-health-tbody">
+                        <tr>
+                            <td colspan="6" class="text-center">Loading device health...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- ============ LIVE TRACKING TAB ============ -->
         <div id="tab-tracking" class="tab-content">
             <header>
@@ -185,6 +335,18 @@
                     <span class="info-value highlight" id="track-distance">— m</span>
                 </div>
                 <div class="info-item">
+                    <span class="info-label">GPS Accuracy</span>
+                    <span class="info-value" id="track-accuracy">±25 m</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Speed</span>
+                    <span class="info-value" id="track-speed">— km/h</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Heading</span>
+                    <span class="info-value" id="track-heading">—°</span>
+                </div>
+                <div class="info-item">
                     <span class="info-label">Last Update</span>
                     <span class="info-value" id="track-last-update">—</span>
                 </div>
@@ -195,7 +357,17 @@
             </div>
             <!-- Full Map -->
             <div class="card full-map-card">
+                <div class="card-header live-map-header">
+                    <h2>Live Route View</h2>
+                    <div class="map-status-chip" id="live-map-mode-badge">Street View · Auto-follow</div>
+                </div>
                 <div id="full-map" class="full-map-container"></div>
+                <div class="map-toolbar">
+                    <button class="btn-primary" id="btn-live-follow"
+                        onclick="setLiveFollow(!liveFollowEnabled, true)">Following Live</button>
+
+                    <button class="btn-secondary" onclick="recenterLiveMap()">Recenter</button>
+                </div>
             </div>
             <!-- Geofence Controls -->
             <div class="card mt-2">
@@ -320,29 +492,22 @@
             </div>
         </div>
 
-        <!-- ============ TRANSACTION LOGS TAB ============ -->
-        <div id="tab-logs" class="tab-content">
+        <!-- ============ AUDIT TRAIL TAB ============ -->
+        <div id="tab-audit" class="tab-content">
             <header>
-                <h1>Transaction Logs</h1>
+                <h1>Audit Trail</h1>
                 <div class="user-profile">
                     <div class="avatar">A</div><span>Administrator</span>
                 </div>
             </header>
 
             <div class="history-controls">
-                <div class="control-group">
-                    <label>Filter by Date</label>
-                    <input type="date" id="log-filter-date">
+                <div class="control-group" style="min-width: 260px;">
+                    <label>Filter by Action</label>
+                    <input type="text" id="audit-filter-action" placeholder="e.g. component.create">
                 </div>
-                <div class="control-group" style="min-width: 200px;">
-                    <label>Filter by Employee</label>
-                    <select id="log-filter-emp"
-                        style="width:100%; padding:10px 14px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:8px;">
-                        <option value="">All Employees</option>
-                    </select>
-                </div>
-                <button class="btn-primary" onclick="loadLogsData()">🔍 Search Logs</button>
-                <button class="btn-secondary" onclick="clearLogFilters()">Reset Filters</button>
+                <button class="btn-primary" data-role-min="admin" onclick="loadAuditLogs(true)">Load Audit Logs</button>
+                <button class="btn-secondary" data-role-min="admin" onclick="clearAuditFilters()">Reset</button>
             </div>
 
             <div class="card full-width">
@@ -350,17 +515,25 @@
                     <thead>
                         <tr>
                             <th>Time</th>
+                            <th>User</th>
+                            <th>Role</th>
                             <th>Action</th>
-                            <th>Equipment</th>
-                            <th>Employee</th>
+                            <th>Entity</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
-                    <tbody id="logs-tbody">
+                    <tbody id="audit-tbody">
                         <tr>
-                            <td colspan="4" class="text-center">Loading logs...</td>
+                            <td colspan="6" class="text-center">Loading audit logs...</td>
                         </tr>
                     </tbody>
                 </table>
+            </div>
+
+            <div class="history-controls" style="margin-top: 12px;">
+                <button class="btn-secondary" onclick="prevAuditPage()">← Previous</button>
+                <button class="btn-secondary" onclick="nextAuditPage()">Next →</button>
+                <span id="audit-page-info" class="command-label" style="margin-left:auto;">Page 1</span>
             </div>
         </div>
 
@@ -398,7 +571,8 @@
                         <input type="text" id="add-comp-tracker" placeholder="e.g. TRACK-001"
                             style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
                     </div>
-                    <button class="btn-primary" onclick="addComponent()" style="padding:10px 20px; height:41px;">Save
+                    <button class="btn-primary" data-role-min="operator" onclick="addComponent()"
+                        style="padding:10px 20px; height:41px;">Save
                         Component</button>
                 </div>
             </div>
@@ -472,7 +646,7 @@
                         <input type="text" id="add-emp-uid" placeholder="Hex UID"
                             style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
                     </div>
-                    <button class="btn-primary" onclick="addEmployee()"
+                    <button class="btn-primary" data-role-min="manager" onclick="addEmployee()"
                         style="flex:1; padding:10px 20px; height:41px;">Save Employee</button>
                 </div>
             </div>
@@ -512,9 +686,9 @@
                 <div id="wifi-profiles-container" style="display:grid; gap:12px; margin-bottom:15px;"></div>
 
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                    <button class="btn-secondary" onclick="addWifiProfileRow()"
+                    <button class="btn-secondary" data-role-min="manager" onclick="addWifiProfileRow()"
                         style="padding:10px 16px;">+ Add Another Network</button>
-                    <button class="btn-primary" onclick="saveWifiConfig()"
+                    <button class="btn-primary" data-role-min="operator" onclick="saveWifiConfig()"
                         style="padding:10px 20px;">Save & Push to Devices</button>
                 </div>
             </div>
@@ -526,7 +700,8 @@
                     <li>On the ESP32 Gate Reader, hold the <strong>SELECT</strong> button for 3 seconds.</li>
                     <li>Scan the <strong>Admin Card</strong> to unlock the menu.</li>
                     <li>Select <strong>"Fetch WiFi Config"</strong> from the menu.</li>
-                    <li>The device will connect to a network, download the profiles, store them in flash, and reconnect securely.
+                    <li>The device will connect to a network, download the profiles, store them in flash, and reconnect
+                        securely.
                     </li>
                 </ol>
             </div>

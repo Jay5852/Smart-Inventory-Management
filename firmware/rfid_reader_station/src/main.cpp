@@ -15,10 +15,10 @@ Preferences prefs; // Non-volatile storage (like EEPROM but better)
 // GLOBAL STATE
 // ==========================================
 String adminCardUID = "";
-String serverIP = "10.93.23.163";
+String serverIP = "192.168.0.167"; // Current PC LAN IP on Wi-Fi
 int serverPort = 3000;
 
-enum AppMode { MODE_FIRST_BOOT, MODE_NORMAL, MODE_ADMIN_MENU };
+enum AppMode { MODE_FIRST_BOOT, MODE_NORMAL, MODE_HOME_MENU, MODE_ADMIN_MENU };
 AppMode appMode = MODE_NORMAL;
 
 enum ScanState { SCAN_FIRST, SCAN_SECOND, SENDING };
@@ -28,6 +28,17 @@ String scannedID1 = "";
 String scannedID2 = "";
 WifiProfile wifiProfiles[MAX_WIFI_PROFILES];
 uint8_t wifiProfileCount = 0;
+String lastSeenUid = "";
+unsigned long lastSeenUidMs = 0;
+unsigned long lastWifiRetryMs = 0;
+const unsigned long WIFI_RETRY_INTERVAL_MS = 30000;
+const unsigned long RFID_DUPLICATE_WINDOW_MS = 1500;
+
+// Home Menu
+int homeMenuIndex = 0;
+const int HOME_MENU_ITEMS = 4;
+const char *homeMenuLabels[] = {"Resume Scan", "WiFi Connect", "Admin Access",
+                                "Exit"};
 
 // Admin Menu
 int menuIndex = 0;
@@ -39,22 +50,37 @@ const char *menuLabels[] = {"Enroll Employee", "Enroll Component",
 // FUNCTION DECLARATIONS
 // ==========================================
 void firstBootSetup();
-void connectToWiFi();
+bool connectToWiFi(bool showUi = true);
 void connectToOpenNetwork();
 void resetScreen();
 void sendScanToServer();
+void enterHomeMenu();
 void enterAdminMenu();
 void enterSetupAccess();
+void drawHomeMenu();
 void drawMenu();
+void handleHomeMenuAction();
 void handleMenuAction();
 void enrollCard(const char *type);
 void fetchWiFiFromServer();
+bool fetchWiFiFromServerInternal(bool interactiveOpenNetwork,
+                                 bool showUi = true);
+void updateWiFiBackground();
+void waitForButtonRelease(unsigned long maxWaitMs = 1500);
+void drawWiFiStatusIcon(int16_t x, int16_t y, bool connected);
+bool consumeButtonPress(uint8_t pin, unsigned long debounceMs = 35,
+                        unsigned long releaseTimeoutMs = 1200);
+String pollRFIDCard();
+String getWiFiLabel();
+void openHomeWiFiMenu();
 
 // ==========================================
 // SETUP
 // ==========================================
 void setup() {
   Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
 
   initButtons();
   initBuzzer();
@@ -76,8 +102,8 @@ void setup() {
   if (wifiProfileCount > 0) {
     connectToWiFi();
   } else {
-    showMessage("No WiFi Saved!", "Push from Dashboard", "or fetch open net");
-    delay(2000);
+    showMessage("No WiFi Saved!", "SELECT = Main Menu", "Choose WiFi");
+    delay(1200);
   }
 
   resetScreen();
@@ -89,33 +115,54 @@ void setup() {
 void loop() {
   logButtonStateChanges();
 
-  // --- CHECK SELECT BUTTON (long-press 3 seconds) ---
-  if (digitalRead(BTN_SELECT) == LOW) {
-    unsigned long pressStart = millis();
-    while (digitalRead(BTN_SELECT) == LOW) {
-      logButtonStateChanges();
-      if (millis() - pressStart > 3000) {
-        // Long press detected! Enter Setup/Admin Mode
-        enterSetupAccess();
-        resetScreen();
-        return;
-      }
-      delay(10);
-    }
+  if (scanState == SCAN_FIRST && appMode == MODE_NORMAL &&
+      consumeButtonPress(BTN_SELECT)) {
+    enterHomeMenu();
+    resetScreen();
+    return;
   }
 
-  // --- NORMAL SCAN MODE ---
-  if (WiFi.status() != WL_CONNECTED && wifiProfileCount > 0) {
-    connectToWiFi();
-  }
+  updateWiFiBackground();
 
-  String uid = readRFIDCard();
+  String uid = pollRFIDCard();
   if (uid == "")
     return;
 
   beep(1);
 
   if (scanState == SCAN_FIRST) {
+    if (uid == adminCardUID) {
+      // Admin card detected — give 2-second window to confirm admin mode
+      // If no button pressed, treat as normal employee scan for transactions
+      showMessage("Admin Card", "SEL = Admin Menu", "Wait = Normal Scan");
+      beep(1);
+
+      unsigned long confirmTimeout = millis();
+      bool adminConfirmed = false;
+      while (millis() - confirmTimeout < 2000) {
+        logButtonStateChanges();
+        if (consumeButtonPress(BTN_SELECT)) {
+          adminConfirmed = true;
+          break;
+        }
+        delay(20);
+      }
+
+      if (adminConfirmed) {
+        showMessage("Admin Card", "Setup Access", "Opening menu...");
+        beep(2);
+        delay(350);
+        enterAdminMenu();
+        lastSeenUid = adminCardUID;
+        lastSeenUidMs = millis();
+        resetScreen();
+        return;
+      }
+
+      // Not confirmed — treat as normal employee scan
+      Serial.println("Admin card used as employee scan");
+    }
+
     scannedID1 = uid;
     Serial.println("First Card Scanned: " + uid);
 
@@ -151,7 +198,7 @@ void firstBootSetup() {
   String uid = "";
   while (uid == "") {
     logButtonStateChanges();
-    uid = readRFIDCard();
+    uid = pollRFIDCard();
     delay(50);
   }
 
@@ -165,19 +212,17 @@ void firstBootSetup() {
   delay(3000);
 
   // Ask to connect to WiFi now
-  showMessage("Setup WiFi?", "SELECT = Open Net", "BACK = Skip");
+  showMessage("Setup WiFi?", "SELECT = WiFi Menu", "BACK = Skip");
 
   unsigned long timeout = millis();
   while (millis() - timeout < 10000) {
     logButtonStateChanges();
 
-    if (digitalRead(BTN_SELECT) == LOW) {
-      delay(200);
-      connectToOpenNetwork();
+    if (consumeButtonPress(BTN_SELECT)) {
+      openHomeWiFiMenu();
       break;
     }
-    if (digitalRead(BTN_SETUP) == LOW) {
-      delay(200);
+    if (consumeButtonPress(BTN_SETUP)) {
       break;
     }
   }
@@ -188,39 +233,118 @@ void firstBootSetup() {
 // ==========================================
 // ADMIN MENU (GFM MODE)
 // ==========================================
+void enterHomeMenu() {
+  appMode = MODE_HOME_MENU;
+  homeMenuIndex = 0;
+  drawHomeMenu();
+  waitForButtonRelease();
+
+  while (appMode == MODE_HOME_MENU) {
+    logButtonStateChanges();
+
+    if (consumeButtonPress(BTN_UP)) {
+      homeMenuIndex = (homeMenuIndex - 1 + HOME_MENU_ITEMS) % HOME_MENU_ITEMS;
+      drawHomeMenu();
+      continue;
+    }
+
+    if (consumeButtonPress(BTN_DOWN)) {
+      homeMenuIndex = (homeMenuIndex + 1) % HOME_MENU_ITEMS;
+      drawHomeMenu();
+      continue;
+    }
+
+    if (consumeButtonPress(BTN_SELECT)) {
+      handleHomeMenuAction();
+      if (appMode == MODE_HOME_MENU) {
+        drawHomeMenu();
+      }
+      continue;
+    }
+
+    if (consumeButtonPress(BTN_SETUP)) {
+      appMode = MODE_NORMAL;
+      break;
+    }
+
+    delay(25);
+  }
+}
+
+void drawHomeMenu() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("=== MAIN MENU ===");
+  display.print("WiFi: ");
+  display.println(getWiFiLabel());
+  display.println("");
+
+  for (int i = 0; i < HOME_MENU_ITEMS; i++) {
+    display.print(i == homeMenuIndex ? "> " : "  ");
+    display.println(homeMenuLabels[i]);
+  }
+
+  display.println("");
+  display.println("UP/DN Move  SEL OK");
+  display.println("BACK Exit");
+  display.display();
+}
+
+void handleHomeMenuAction() {
+  switch (homeMenuIndex) {
+  case 0:
+    appMode = MODE_NORMAL;
+    break;
+  case 1:
+    openHomeWiFiMenu();
+    break;
+  case 2:
+    appMode = MODE_NORMAL;
+    enterSetupAccess();
+    break;
+  case 3:
+    appMode = MODE_NORMAL;
+    break;
+  }
+}
+
 void enterAdminMenu() {
   appMode = MODE_ADMIN_MENU;
   menuIndex = 0;
   drawMenu();
+  waitForButtonRelease();
+  unsigned long ignoreInputUntil = millis() + 400;
 
   while (appMode == MODE_ADMIN_MENU) {
     logButtonStateChanges();
 
+    if (millis() < ignoreInputUntil) {
+      delay(20);
+      continue;
+    }
+
     // UP button
-    if (digitalRead(BTN_UP) == LOW) {
+    if (consumeButtonPress(BTN_UP)) {
       menuIndex = (menuIndex - 1 + MENU_ITEMS) % MENU_ITEMS;
       drawMenu();
-      delay(250);
     }
 
     // DOWN button
-    if (digitalRead(BTN_DOWN) == LOW) {
+    if (consumeButtonPress(BTN_DOWN)) {
       menuIndex = (menuIndex + 1) % MENU_ITEMS;
       drawMenu();
-      delay(250);
     }
 
     // SELECT button
-    if (digitalRead(BTN_SELECT) == LOW) {
-      delay(200);
+    if (consumeButtonPress(BTN_SELECT)) {
       handleMenuAction();
       if (appMode == MODE_ADMIN_MENU)
         drawMenu();
     }
 
-    // BACK button (exit menu)
-    if (digitalRead(BTN_SETUP) == LOW) {
-      delay(200);
+    // BACK button exits menu immediately
+    if (consumeButtonPress(BTN_SETUP)) {
       appMode = MODE_NORMAL;
     }
 
@@ -231,13 +355,14 @@ void enterAdminMenu() {
 void enterSetupAccess() {
   beep(3);
   showMessage("SETUP ACCESS", "", "Scan Admin Card...");
+  waitForButtonRelease();
 
   // Wait for Admin Card scan (10 second timeout)
   unsigned long timeout = millis();
   String scanned = "";
   while (millis() - timeout < 10000) {
     logButtonStateChanges();
-    scanned = readRFIDCard();
+    scanned = pollRFIDCard();
     if (scanned != "")
       break;
     delay(50);
@@ -245,7 +370,10 @@ void enterSetupAccess() {
 
   if (scanned == adminCardUID) {
     beep(2);
+    waitForButtonRelease();
     enterAdminMenu();
+    lastSeenUid = adminCardUID;
+    lastSeenUidMs = millis();
   } else if (scanned != "") {
     showMessage("ACCESS DENIED", "", "Wrong Card!");
     beep(1);
@@ -274,6 +402,7 @@ void drawMenu() {
 
   display.println("");
   display.println("UP/DN=Move SEL=OK");
+  display.println("Exit=Menu item #4");
   display.display();
 }
 
@@ -303,7 +432,7 @@ void enrollCard(const char *type) {
   String uid = "";
   unsigned long timeout = millis();
   while (uid == "" && millis() - timeout < 15000) {
-    uid = readRFIDCard();
+    uid = pollRFIDCard();
     delay(50);
   }
 
@@ -346,28 +475,51 @@ void enrollCard(const char *type) {
 // ==========================================
 // OTA WIFI FETCH FROM DASHBOARD
 // ==========================================
-void fetchWiFiFromServer() {
-  showMessage("FETCH WiFi", "Connecting to", "open network...");
-  delay(1000);
+void fetchWiFiFromServer() { fetchWiFiFromServerInternal(true, true); }
+
+bool fetchWiFiFromServerInternal(bool interactiveOpenNetwork, bool showUi) {
+  if (showUi) {
+    showMessage("FETCH WiFi", "Connecting to", "open network...");
+    delay(800);
+  } else {
+    Serial.println("[WiFi] Provisioning skipped: user must select network.");
+  }
 
   // If not connected, try to find an open network
   if (WiFi.status() != WL_CONNECTED) {
-    connectToOpenNetwork();
+    if (interactiveOpenNetwork) {
+      connectToOpenNetwork();
+    } else {
+      if (showUi) {
+        showMessage("No Open WiFi", "Use WiFi menu", "Choose network");
+        delay(1200);
+      }
+      return false;
+    }
   }
 
   if (WiFi.status() != WL_CONNECTED) {
-    showMessage("FAILED!", "No network found", "Try again later.");
-    delay(2000);
-    return;
+    if (showUi) {
+      showMessage("FAILED!", "No network found", "Try again later.");
+      delay(1500);
+    } else {
+      Serial.println("[WiFi] Background provisioning skipped: no network.");
+    }
+    return false;
   }
 
-  showMessage("Connected!", "Fetching WiFi", "from Dashboard...");
+  if (showUi) {
+    showMessage("Connected!", "Fetching WiFi", "from Dashboard...");
+  } else {
+    Serial.println("[WiFi] Connected to bootstrap network. Fetching profiles.");
+  }
 
   HTTPClient http;
   String url =
       "http://" + serverIP + ":" + String(serverPort) + "/api/wifi-config";
   http.begin(url);
   int code = http.GET();
+  bool fetchSuccess = false;
 
   if (code == 200) {
     String resp = http.getString();
@@ -379,45 +531,233 @@ void fetchWiFiFromServer() {
       saveWifiProfiles(prefs, fetchedProfiles, fetchedCount);
       loadWifiProfiles(prefs, wifiProfiles, wifiProfileCount);
 
-      showMessage("WiFi SAVED!", String(wifiProfileCount) + " profile(s)",
-                  "Reconnecting...");
-      beep(3);
-      delay(1500);
+      if (showUi) {
+        showMessage("WiFi SAVED!", String(wifiProfileCount) + " profile(s)",
+                    "Reconnecting...");
+      } else {
+        Serial.printf("[WiFi] Saved %u WiFi profile(s).\n", wifiProfileCount);
+      }
+      if (showUi) {
+        beep(3);
+        delay(1200);
+      }
 
       WiFi.disconnect();
-      delay(500);
-      connectToWiFi();
+      delay(showUi ? 500 : 250);
+      connectToWiFi(showUi);
+      fetchSuccess = (WiFi.status() == WL_CONNECTED);
     } else {
-      showMessage("PARSE ERROR", "Bad response", resp.substring(0, 30));
-      delay(2000);
+      if (showUi) {
+        showMessage("PARSE ERROR", "Bad response", resp.substring(0, 30));
+        delay(1500);
+      } else {
+        Serial.println("[WiFi] Failed to parse dashboard WiFi profiles.");
+      }
     }
   } else {
-    showMessage("FETCH FAILED", "Code: " + String(code),
-                "Check Dashboard API");
-    delay(2000);
+    if (showUi) {
+      showMessage("FETCH FAILED", "Code: " + String(code),
+                  "Check Dashboard API");
+      delay(1500);
+    } else {
+      Serial.printf("[WiFi] Dashboard fetch failed with code %d.\n", code);
+    }
   }
 
   http.end();
+  if (!fetchSuccess && wifiProfileCount == 0 && WiFi.status() == WL_CONNECTED) {
+    WiFi.disconnect();
+  }
+  return fetchSuccess;
 }
 
 // ==========================================
 // WIFI CONNECTIONS
 // ==========================================
-void connectToWiFi() {
+bool connectToWiFi(bool showUi) {
   if (wifiProfileCount == 0) {
-    showMessage("No WiFi profiles", "Push from Dashboard", "or fetch open net");
-    delay(2000);
+    if (showUi) {
+      showMessage("No WiFi profiles", "Open WiFi Connect", "from main menu");
+      delay(1500);
+    }
+    return false;
+  }
+
+  if (showUi) {
+    showMessage("Connecting WiFi", "Trying saved", "profiles...");
+  } else {
+    Serial.println("[WiFi] Retrying saved profiles in background.");
+  }
+
+  if (connectToSavedWifi(wifiProfiles, wifiProfileCount)) {
+    if (showUi) {
+      showMessage("WiFi Connected!", WiFi.localIP().toString(),
+                  WiFi.SSID().substring(0, 20));
+      delay(1200);
+    } else {
+      Serial.println("[WiFi] Reconnected to " + WiFi.SSID());
+    }
+    return true;
+  } else {
+    Serial.println("\nWiFi Connection Failed");
+    if (showUi) {
+      showMessage("WiFi Failed!", "Auto retry enabled", "Use WiFi Connect");
+      delay(1500);
+    }
+  }
+
+  return false;
+}
+
+void updateWiFiBackground() {
+  unsigned long now = millis();
+
+  if (WiFi.status() == WL_CONNECTED || scanState != SCAN_FIRST ||
+      appMode != MODE_NORMAL) {
     return;
   }
 
-  showMessage("Connecting WiFi", "Trying saved", "profiles...");
-  if (connectToSavedWifi(wifiProfiles, wifiProfileCount)) {
-    showMessage("WiFi Connected!", WiFi.localIP().toString(), "");
-    delay(1500);
+  if (wifiProfileCount > 0 && now - lastWifiRetryMs >= WIFI_RETRY_INTERVAL_MS) {
+    lastWifiRetryMs = now;
+    connectToWiFi(false);
+  }
+}
+
+void waitForButtonRelease(unsigned long maxWaitMs) {
+  unsigned long start = millis();
+  while (millis() - start < maxWaitMs) {
+    bool anyPressed =
+        (digitalRead(BTN_UP) == LOW) || (digitalRead(BTN_DOWN) == LOW) ||
+        (digitalRead(BTN_SELECT) == LOW) || (digitalRead(BTN_SETUP) == LOW);
+    if (!anyPressed) {
+      delay(40);
+      return;
+    }
+    delay(20);
+  }
+}
+
+void drawWiFiStatusIcon(int16_t x, int16_t y, bool connected) {
+  if (connected) {
+    display.drawCircle(x, y, 6, SSD1306_WHITE);
+    display.drawCircle(x, y, 4, SSD1306_WHITE);
+    display.drawCircle(x, y, 2, SSD1306_WHITE);
+    display.fillCircle(x, y + 7, 1, SSD1306_WHITE);
   } else {
-    Serial.println("\nWiFi Connection Failed");
-    showMessage("WiFi Failed!", "Will retry later", "or use Admin Menu");
-    delay(2000);
+    display.drawCircle(x, y, 6, SSD1306_WHITE);
+    display.drawLine(x - 7, y + 8, x + 7, y - 6, SSD1306_WHITE);
+  }
+}
+
+bool consumeButtonPress(uint8_t pin, unsigned long debounceMs,
+                        unsigned long releaseTimeoutMs) {
+  if (digitalRead(pin) != LOW) {
+    return false;
+  }
+
+  delay(debounceMs);
+  if (digitalRead(pin) != LOW) {
+    return false;
+  }
+
+  unsigned long start = millis();
+  while (digitalRead(pin) == LOW && millis() - start < releaseTimeoutMs) {
+    logButtonStateChanges();
+    delay(10);
+  }
+
+  delay(25);
+  return true;
+}
+
+String pollRFIDCard() {
+  String uid = readRFIDCard();
+  if (uid == "") {
+    return "";
+  }
+
+  unsigned long now = millis();
+  if (uid == lastSeenUid && now - lastSeenUidMs < RFID_DUPLICATE_WINDOW_MS) {
+    return "";
+  }
+
+  lastSeenUid = uid;
+  lastSeenUidMs = now;
+  return uid;
+}
+
+String getWiFiLabel() {
+  if (WiFi.status() == WL_CONNECTED) {
+    String ssid = WiFi.SSID();
+    return ssid.length() > 12 ? ssid.substring(0, 12) : ssid;
+  }
+
+  if (wifiProfileCount > 0) {
+    return "Auto retry";
+  }
+
+  return "No profile";
+}
+
+void openHomeWiFiMenu() {
+  const int WIFI_MENU_ITEMS = 4;
+  const char *wifiMenu[] = {"Retry Saved WiFi", "Fetch Dashboard WiFi",
+                            "Open Network", "Back"};
+  int wifiMenuIndex = 0;
+
+  waitForButtonRelease(2000);
+
+  while (true) {
+    logButtonStateChanges();
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("=== WIFI STATUS ===");
+    display.print("State: ");
+    display.println(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "OFFLINE");
+    display.print("Now: ");
+    display.println(getWiFiLabel());
+    display.print("Saved: ");
+    display.println(String(wifiProfileCount));
+
+    for (int i = 0; i < WIFI_MENU_ITEMS; i++) {
+      display.print(i == wifiMenuIndex ? "> " : "  ");
+      display.println(wifiMenu[i]);
+    }
+
+    display.display();
+
+    if (consumeButtonPress(BTN_UP)) {
+      wifiMenuIndex = (wifiMenuIndex - 1 + WIFI_MENU_ITEMS) % WIFI_MENU_ITEMS;
+      continue;
+    }
+
+    if (consumeButtonPress(BTN_DOWN)) {
+      wifiMenuIndex = (wifiMenuIndex + 1) % WIFI_MENU_ITEMS;
+      continue;
+    }
+
+    if (consumeButtonPress(BTN_SETUP)) {
+      return;
+    }
+
+    if (!consumeButtonPress(BTN_SELECT)) {
+      delay(20);
+      continue;
+    }
+
+    if (wifiMenuIndex == 0) {
+      connectToWiFi(true);
+    } else if (wifiMenuIndex == 1) {
+      fetchWiFiFromServerInternal(true, true);
+    } else if (wifiMenuIndex == 2) {
+      connectToOpenNetwork();
+    } else {
+      return;
+    }
+
+    waitForButtonRelease(2000);
   }
 }
 
@@ -483,16 +823,13 @@ void connectToOpenNetwork() {
     // Wait for button press
     delay(100);
 
-    if (digitalRead(BTN_UP) == LOW) {
+    if (consumeButtonPress(BTN_UP)) {
       selected = (selected - 1 + openCount) % openCount;
-      delay(200);
     }
-    if (digitalRead(BTN_DOWN) == LOW) {
+    if (consumeButtonPress(BTN_DOWN)) {
       selected = (selected + 1) % openCount;
-      delay(200);
     }
-    if (digitalRead(BTN_SELECT) == LOW) {
-      delay(200);
+    if (consumeButtonPress(BTN_SELECT)) {
       // Connect to selected open network
       String ssid = WiFi.SSID(openNets[selected]);
       showMessage("Connecting to", ssid, "...");
@@ -514,8 +851,7 @@ void connectToOpenNetwork() {
       }
       return;
     }
-    if (digitalRead(BTN_SETUP) == LOW) {
-      delay(200);
+    if (consumeButtonPress(BTN_SETUP)) {
       return; // Cancel
     }
   }
@@ -578,13 +914,15 @@ void resetScreen() {
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.println("Gate Reader Ready");
+  drawWiFiStatusIcon(118, 9, WiFi.status() == WL_CONNECTED);
   display.println("-----------------");
-  display.println("");
   display.setTextSize(2);
   display.println("Scan Tag");
   display.setTextSize(1);
-  display.println("");
-  display.println("SEL: Hold 3s=Setup");
+  display.print("WiFi: ");
+  display.println(getWiFiLabel());
+  display.println("SELECT: Main Menu");
+  display.println("Scan cards below");
   display.display();
 
   scanState = SCAN_FIRST;

@@ -8,15 +8,23 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <style>
-        .employee-portal {
-            max-width: 800px;
-            margin: 40px auto;
-            padding: 20px;
+        /* ===== LOGIN SCREEN: Force full-page centering ===== */
+        body.login-mode {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: var(--bg-light);
+            background-image: radial-gradient(circle at 50% 0%, rgba(2, 132, 199, 0.06) 0%, transparent 60%);
         }
+        /* Hide sidebar / main when in login mode */
+        body.login-mode .sidebar,
+        body.login-mode .content { display: none !important; }
 
-        .login-screen {
-            text-align: center;
-            margin-top: 100px;
+        .login-wrapper {
+            width: 100%;
+            max-width: 440px;
+            padding: 20px;
         }
 
         .login-card {
@@ -24,111 +32,292 @@
             padding: 40px;
             border-radius: 16px;
             border: 1px solid var(--border);
-            max-width: 400px;
-            margin: 0 auto;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
         }
 
         .login-input {
             width: 100%;
             padding: 12px;
-            margin: 20px 0;
+            margin-bottom: 15px;
             border-radius: 8px;
             border: 1px solid var(--border);
-            background: var(--bg-dark);
-            color: white;
+            background: var(--card-bg-soft);
+            color: var(--text-primary);
+            box-sizing: border-box;
+            font-size: 1rem;
+            font-family: inherit;
+        }
+        .login-input:focus {
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.1);
+        }
+        .hint-box {
+            background: rgba(2, 132, 199, 0.08);
+            border: 1px solid rgba(2, 132, 199, 0.25);
+            padding: 12px 14px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+            text-align: left;
         }
 
-        .portal-header {
+        .hidden { display: none !important; }
+
+        /* ===== DASHBOARD: Enterprise metric cards ===== */
+        .emp-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .emp-stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 22px;
+            border-left: 4px solid var(--primary);
+        }
+        .emp-stat-card h3 {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0 0 8px 0;
+            font-weight: 500;
+        }
+        .emp-stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .emp-stat-card.warning { border-left-color: var(--warning); }
+        .emp-stat-card.success { border-left-color: var(--success); }
+        .emp-stat-card.danger  { border-left-color: var(--danger); }
+
+        /* Request history section */
+        .request-history-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-top: 25px;
+        }
+        .request-history-card .card-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
+            padding: 18px 22px;
+            border-bottom: 1px solid var(--border);
         }
-
-        .component-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 20px;
-        }
-
-        .comp-card {
-            background: var(--card-bg);
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-        }
-
-        .comp-card h3 {
-            margin-bottom: 10px;
-        }
-
-        .status-in {
-            color: var(--success);
-        }
-
-        .status-out {
-            color: var(--warning);
-        }
-
-        .request-btn {
-            width: 100%;
-            margin-top: 15px;
-        }
-
-        .hidden {
-            display: none;
-        }
-
-        .my-requests {
-            margin-top: 40px;
-            background: var(--card-bg);
-            padding: 20px;
-            border-radius: 12px;
+        .request-history-card .card-header h2 {
+            margin: 0;
+            font-size: 1.15rem;
         }
     </style>
 </head>
 
-<body>
-    <div class="employee-portal">
+<body class="login-mode">
 
-        <!-- LOGIN SCREEN -->
-        <div id="login-view" class="login-screen">
-            <div class="logo" style="justify-content: center; margin-bottom: 20px;">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <!-- ============================================ -->
+    <!-- 1. LOGIN SCREEN (Centered Until Auth)        -->
+    <!-- ============================================ -->
+    <div id="login-view" class="login-wrapper">
+        <div class="login-card">
+            <div style="display: flex; justify-content: center; margin-bottom: 15px;">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2">
                     <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                 </svg>
-                <h2>SyncTrack</h2>
             </div>
-            <div class="login-card">
-                <h3>Employee Portal Login</h3>
-                <p style="color:var(--text-secondary); margin-top:10px;">Select your employee profile to request
-                    equipment</p>
-                <select id="emp-select" class="login-input">
-                    <option value="">Loading employees...</option>
-                </select>
-                <button class="btn-primary" style="width:100%" onclick="login()">Enter Portal</button>
+            <h2 style="margin-top: 0; margin-bottom: 5px; font-weight: 600;">Employee Portal</h2>
+            <p style="color:var(--text-secondary); margin-bottom: 20px; font-size: 0.95rem;">Access your equipment and submit requests</p>
+            
+            <div class="hint-box">
+                <strong style="color: var(--primary);">💡 Login Hint:</strong><br>
+                <span style="color: var(--text-secondary);">Type your name (e.g. <strong>Employee 1</strong>). Password can be anything.</span>
+            </div>
+
+            <div style="text-align: left;">
+                <label style="display:block; margin-bottom:6px; font-size:0.9rem; color:var(--text-secondary); font-weight:500;">Username</label>
+                <input type="text" id="emp-username" class="login-input" placeholder="e.g. Employee 1">
+            </div>
+            <div style="text-align: left;">
+                <label style="display:block; margin-bottom:6px; font-size:0.9rem; color:var(--text-secondary); font-weight:500;">Password</label>
+                <input type="password" id="emp-password" class="login-input" placeholder="••••••••">
+            </div>
+
+            <button class="btn-primary" style="width:100%; padding:12px; font-size:1.05rem; margin-top: 5px;" onclick="login()">Enter Portal</button>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--border);">
+                <a href="home.html" style="color: var(--text-secondary); text-decoration: none; font-size: 0.9em;">&larr; Back Home</a>
+                <a href="login.html" style="color: var(--primary); text-decoration: none; font-size: 0.9em; font-weight: 500;">Admin Login &rarr;</a>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ============================================ -->
+    <!-- 2. FULL ENTERPRISE DASHBOARD (After Login)   -->
+    <!-- ============================================ -->
+
+    <!-- Sidebar Navigation -->
+    <div class="sidebar">
+        <div class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+            <h2>Employee</h2>
+        </div>
+        <nav>
+            <a href="#" class="active" data-tab="overview" onclick="switchTab('overview', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="7" height="7" />
+                    <rect x="14" y="3" width="7" height="7" />
+                    <rect x="14" y="14" width="7" height="7" />
+                    <rect x="3" y="14" width="7" height="7" />
+                </svg>
+                Overview
+            </a>
+            <a href="#" data-tab="mytools" onclick="switchTab('mytools', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                    <line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
+                My Equipment
+            </a>
+            <a href="#" data-tab="browse" onclick="switchTab('browse', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                Browse Storeroom
+            </a>
+            <a href="#" data-tab="myrequests" onclick="switchTab('myrequests', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                </svg>
+                My Requests
+            </a>
+            
+            <a href="#" onclick="logout(); return false;" style="margin-top:auto; color:var(--danger);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+                Logout
+            </a>
+        </nav>
+        <div class="status-indicator">
+            <span class="dot" id="ws-dot"></span>
+            Server: <span id="ws-status">Connecting...</span>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="content">
+        <div class="command-bar">
+            <div class="command-meta">
+                <p class="command-label">Employee Console</p>
+                <h2 id="command-tab-title">Employee Overview</h2>
+            </div>
+            <div class="command-actions">
+                <span style="color:var(--text-secondary); margin-right:15px; font-weight:500;">Logged in as: <span id="emp-name-display" style="color:var(--primary); font-weight: 600;">...</span></span>
+                <button class="btn-secondary" onclick="loadDashboard()">Refresh Data</button>
+                <button class="btn-primary" onclick="switchTab('browse', document.querySelector('nav a[data-tab=\'browse\']'))">Request Hardware</button>
             </div>
         </div>
 
-        <!-- PORTAL VIEW -->
-        <div id="portal-view" class="hidden">
-            <div class="portal-header">
-                <div>
-                    <h1>Welcome, <span id="emp-name-display"></span></h1>
-                    <p style="color:var(--text-secondary)">Request equipment for checkout</p>
+        <!-- ========== TAB: OVERVIEW ========== -->
+        <div id="tab-overview" class="tab-content active">
+            <header>
+                <h1>Employee Overview</h1>
+                <div class="user-profile">
+                    <div class="avatar" id="emp-avatar">E</div><span id="emp-name-header">Employee</span>
                 </div>
-                <button class="btn-secondary" onclick="logout()">Logout</button>
+            </header>
+
+            <!-- Stat Summary Cards -->
+            <div class="emp-stats-grid">
+                <div class="emp-stat-card">
+                    <h3>Total Storeroom Items</h3>
+                    <div class="value" id="emp-stat-total">0</div>
+                </div>
+                <div class="emp-stat-card success">
+                    <h3>Available for Checkout</h3>
+                    <div class="value" id="emp-stat-available" style="color: var(--success);">0</div>
+                </div>
+                <div class="emp-stat-card warning">
+                    <h3>My Checked Out Tools</h3>
+                    <div class="value" id="emp-stat-mytools" style="color: var(--warning);">0</div>
+                </div>
+                <div class="emp-stat-card danger">
+                    <h3>Pending Requests</h3>
+                    <div class="value" id="emp-stat-pending" style="color: var(--danger);">0</div>
+                </div>
             </div>
 
-            <div class="my-requests">
-                <h2>🛠️ Tools Currently Checked Out By Me</h2>
-                <p style="color:var(--text-secondary); margin-bottom: 20px;">Return these tools to the inventory yard
-                    and scan them at the gate to check them back in.</p>
+            <!-- Quick Actions + Recent Activity -->
+            <div class="main-grid">
+                <div class="card feed-card">
+                    <div class="card-header">
+                        <h2>Quick Actions</h2>
+                    </div>
+                    <div style="padding: 20px;">
+                        <button class="btn-primary" style="width:100%; padding:14px; margin-bottom:12px; font-size:1rem;" onclick="switchTab('browse', document.querySelector('nav a[data-tab=\'browse\']'))">
+                            📦 Browse & Request Equipment
+                        </button>
+                        <button class="btn-secondary" style="width:100%; padding:14px; margin-bottom:12px; font-size:1rem;" onclick="switchTab('mytools', document.querySelector('nav a[data-tab=\'mytools\']'))">
+                            🛠️ View My Checked Out Tools
+                        </button>
+                        <button class="btn-secondary" style="width:100%; padding:14px; font-size:1rem;" onclick="switchTab('myrequests', document.querySelector('nav a[data-tab=\'myrequests\']'))">
+                            📋 View My Pending Requests
+                        </button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h2>System Information</h2>
+                    </div>
+                    <div style="padding: 20px;">
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border);">
+                            <span style="color: var(--text-secondary);">Portal Version</span>
+                            <strong>v2.1.0</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border);">
+                            <span style="color: var(--text-secondary);">Backend API</span>
+                            <strong style="color: var(--success);">Online</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border);">
+                            <span style="color: var(--text-secondary);">WebSocket</span>
+                            <strong id="ws-info-text" style="color: var(--success);">Connected</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 12px 0;">
+                            <span style="color: var(--text-secondary);">Last Sync</span>
+                            <strong id="last-sync-time">—</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== TAB: MY TOOLS ========== -->
+        <div id="tab-mytools" class="tab-content">
+            <div class="table-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding:20px; border-bottom:1px solid var(--border);">
+                    <div>
+                        <h2 style="margin:0; font-size:1.25rem;">My Assigned Equipment</h2>
+                        <p style="color:var(--text-secondary); margin:5px 0 0 0; font-size:0.9rem;">Telecom equipment currently checked out to you and in the field.</p>
+                    </div>
+                    <button class="btn-secondary" onclick="loadDashboard()">↻ Refresh</button>
+                </div>
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Tool Name</th>
-                            <th>Tool ID</th>
+                            <th>Component Name</th>
+                            <th>Tracking UID</th>
                             <th>Status</th>
                         </tr>
                     </thead>
@@ -140,7 +329,62 @@
                 </table>
             </div>
         </div>
-    </div>
+
+        <!-- ========== TAB: BROWSE STOREROOM ========== -->
+        <div id="tab-browse" class="tab-content">
+            <div class="table-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding:20px; border-bottom:1px solid var(--border);">
+                    <div>
+                        <h2 style="margin:0; font-size:1.25rem;">Available Inventory</h2>
+                        <p style="color:var(--text-secondary); margin:5px 0 0 0; font-size:0.9rem;">Browse available storeroom components. Click "Request" to submit a checkout request that will be emailed to your Administrator.</p>
+                    </div>
+                    <button class="btn-secondary" onclick="fetchAvailableTools()">↻ Refresh</button>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Component Name</th>
+                            <th>UID</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="available-tools-tbody">
+                        <tr>
+                            <td colspan="3" class="text-center">Loading available equipment...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ========== TAB: MY REQUESTS ========== -->
+        <div id="tab-myrequests" class="tab-content">
+            <div class="table-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding:20px; border-bottom:1px solid var(--border);">
+                    <div>
+                        <h2 style="margin:0; font-size:1.25rem;">My Request History</h2>
+                        <p style="color:var(--text-secondary); margin:5px 0 0 0; font-size:0.9rem;">Track the status of all your submitted equipment requests. Approved items will be available for pickup at the security gate.</p>
+                    </div>
+                    <button class="btn-secondary" onclick="loadMyRequests()">↻ Refresh</button>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Submitted</th>
+                            <th>Component</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="my-requests-tbody">
+                        <tr>
+                            <td colspan="3" class="text-center">Loading request history...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+    </main>
 
     <div id="toast-container" class="toast-container"></div>
     <script src="employee.js"></script>

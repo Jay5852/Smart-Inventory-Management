@@ -218,6 +218,50 @@ app.post('/api/enroll', (req, res) => {
 // ==========================================
 let wifiProfiles = [];
 
+function loadWifiProfilesFromDb() {
+    db.all(`SELECT ssid, password
+            FROM wifi_profiles
+            ORDER BY sort_order ASC, id ASC`, [], (err, rows) => {
+        if (err) {
+            console.error('Failed to load WiFi profiles from database:', err.message);
+            return;
+        }
+
+        wifiProfiles = Array.isArray(rows)
+            ? rows.map(row => ({ ssid: row.ssid || '', password: row.password || '' })).filter(profile => profile.ssid.length > 0)
+            : [];
+    });
+}
+
+function persistWifiProfiles(profiles, callback) {
+    db.serialize(() => {
+        db.run('DELETE FROM wifi_profiles', (deleteErr) => {
+            if (deleteErr) {
+                callback(deleteErr);
+                return;
+            }
+
+            if (!profiles.length) {
+                callback(null);
+                return;
+            }
+
+            const stmt = db.prepare(`INSERT INTO wifi_profiles (ssid, password, sort_order, updated_at)
+                                     VALUES (?, ?, ?, CURRENT_TIMESTAMP)`);
+
+            profiles.forEach((profile, index) => {
+                stmt.run(profile.ssid, profile.password || '', index);
+            });
+
+            stmt.finalize((finalizeErr) => {
+                callback(finalizeErr || null);
+            });
+        });
+    });
+}
+
+setTimeout(loadWifiProfilesFromDb, 500);
+
 function normalizeWifiProfiles(body) {
     if (Array.isArray(body.profiles)) {
         return body.profiles
@@ -238,11 +282,25 @@ function normalizeWifiProfiles(body) {
 }
 
 app.get('/api/wifi-config', (req, res) => {
-    if (wifiProfiles.length === 0) {
-        return res.status(404).json({ error: "No WiFi profiles set yet. Set them from the Dashboard." });
+    if (wifiProfiles.length > 0) {
+        return res.json({ profiles: wifiProfiles, count: wifiProfiles.length });
     }
 
-    res.json({ profiles: wifiProfiles, count: wifiProfiles.length });
+    db.all(`SELECT ssid, password FROM wifi_profiles ORDER BY sort_order ASC, id ASC`, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        const profiles = Array.isArray(rows)
+            ? rows.map(row => ({ ssid: row.ssid || '', password: row.password || '' })).filter(profile => profile.ssid.length > 0)
+            : [];
+
+        wifiProfiles = profiles;
+
+        if (profiles.length === 0) {
+            return res.status(404).json({ error: "No WiFi profiles set yet. Set them from the Dashboard." });
+        }
+
+        res.json({ profiles, count: profiles.length });
+    });
 });
 
 app.post('/api/wifi-config', requireRole('manager'), (req, res) => {
@@ -252,27 +310,33 @@ app.post('/api/wifi-config', requireRole('manager'), (req, res) => {
         return res.status(400).json({ error: "At least one SSID is required" });
     }
 
-    wifiProfiles = profiles;
+    persistWifiProfiles(profiles, (persistErr) => {
+        if (persistErr) {
+            return res.status(500).json({ error: persistErr.message });
+        }
 
-    auditFromRequest(req, {
-        action: 'wifi.update_profiles',
-        entityType: 'wifi_config',
-        entityId: 'global',
-        details: { count: wifiProfiles.length }
-    });
+        wifiProfiles = profiles;
 
-    broadcastUpdate({
-        type: 'alert',
-        message: `📡 WiFi profiles updated (${wifiProfiles.length}). Devices will fetch on next sync.`,
-        severity: 'info'
-    });
+        auditFromRequest(req, {
+            action: 'wifi.update_profiles',
+            entityType: 'wifi_config',
+            entityId: 'global',
+            details: { count: wifiProfiles.length }
+        });
 
-    broadcastUpdate({ type: 'wifi_config_updated', profiles: wifiProfiles, count: wifiProfiles.length });
+        broadcastUpdate({
+            type: 'alert',
+            message: `📡 WiFi profiles updated (${wifiProfiles.length}). Devices will fetch on next sync.`,
+            severity: 'info'
+        });
 
-    res.json({
-        message: "WiFi profiles saved. ESP32 devices will pick them up automatically.",
-        profiles: wifiProfiles,
-        count: wifiProfiles.length
+        broadcastUpdate({ type: 'wifi_config_updated', profiles: wifiProfiles, count: wifiProfiles.length });
+
+        res.json({
+            message: "WiFi profiles saved. ESP32 devices will pick them up automatically.",
+            profiles: wifiProfiles,
+            count: wifiProfiles.length
+        });
     });
 });
 
@@ -286,7 +350,7 @@ let geofenceConfig = {
     name: "Authorized Work Zone"
 };
 
-const activeTrackers = {}; // State for GPS smoothing
+const activeTrackers = {}; // State for GPS smoothing + health info
 
 // WebSocket connections
 wss.on('connection', (ws) => {
@@ -324,7 +388,8 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
 
 // 1. RFID GATE SCANNER (Check in / Check out)
 app.post('/api/transactions/scan', (req, res) => {
-    let { componentUid, employeeUid } = req.body;
+    const { componentUid, employeeUid } = req.body;
+    console.log(`[SCAN] Scan API called. componentUid=${componentUid}, employeeUid=${employeeUid}, time=${new Date().toISOString()}`);
 
     if (!componentUid || !employeeUid) {
         return res.status(400).json({ error: "Missing UIDs" });
@@ -332,59 +397,98 @@ app.post('/api/transactions/scan', (req, res) => {
 
     console.log(`Gate Scan Received: ID1=${componentUid}, ID2=${employeeUid}`);
 
-    // ORDER AGNOSTIC LOOKUP (Find which is Component and which is Employee)
-    db.get(`SELECT uid FROM components WHERE uid = ? OR uid = ?`, [componentUid, employeeUid], (err, compRow) => {
-        if (err || !compRow) return res.status(404).json({ error: "No valid component tag scanned" });
+    // ORDER AGNOSTIC LOOKUP (one component tag + one employee card required)
+    db.all(`SELECT uid, name, status, assigned_to, tracker_id FROM components WHERE uid = ? OR uid = ?`, [componentUid, employeeUid], (compErr, compRows) => {
+        if (compErr) return res.status(500).json({ error: compErr.message });
 
-        db.get(`SELECT uid FROM employees WHERE uid = ? OR uid = ?`, [componentUid, employeeUid], (err, empRow) => {
-            if (err || !empRow) return res.status(404).json({ error: "No valid employee card scanned" });
+        db.all(`SELECT uid, name FROM employees WHERE uid = ? OR uid = ?`, [componentUid, employeeUid], (empErr, empRows) => {
+            if (empErr) return res.status(500).json({ error: empErr.message });
 
-            const realCompUid = compRow.uid;
-            const realEmpUid = empRow.uid;
+            if (!Array.isArray(compRows) || compRows.length === 0) {
+                // No component found — check if both UIDs are employees
+                const empNames = (empRows || []).map(e => e.name).join(', ');
+                const hint = empRows && empRows.length >= 2
+                    ? `Both scanned cards (${componentUid}, ${employeeUid}) are employee cards (${empNames}) — no component tag was scanned. Please scan one Component tag + one Employee card.`
+                    : `No component tag found among scanned UIDs: ${componentUid}, ${employeeUid}. Please scan a registered component tag.`;
+                return res.status(404).json({ error: hint });
+            }
 
-            db.get(`SELECT * FROM components WHERE uid = ?`, [realCompUid], (err, comp) => {
-                db.get(`SELECT * FROM employees WHERE uid = ?`, [realEmpUid], (err, emp) => {
+            if (!Array.isArray(empRows) || empRows.length === 0) {
+                // No employee found — check if both UIDs are components
+                const compNames = (compRows || []).map(c => c.name).join(', ');
+                const hint = compRows && compRows.length >= 2
+                    ? `Both scanned tags (${componentUid}, ${employeeUid}) are components (${compNames}) — no employee card was scanned. Please scan one Component tag + one Employee card.`
+                    : `No employee card found among scanned UIDs: ${componentUid}, ${employeeUid}. Please scan a registered employee card.`;
+                return res.status(404).json({ error: hint });
+            }
 
-                    let isCheckingOut = comp.status === 'IN';
-                    let newStatus = isCheckingOut ? 'OUT' : 'IN';
-                    let assignedTo = isCheckingOut ? emp.name : null;
-
-                    // --- AUTOMATIC CHECKOUT ---
-                    // The employee scanned both tags, immediately check it out to them.
-                    if (isCheckingOut) {
-                        console.log(`✅ Automatic Checkout: ${emp.name} is taking ${comp.name}`);
-                        broadcastUpdate({
-                            type: 'alert',
-                            message: `✅ Successful Check-out: ${emp.name} took ${comp.name}. GPS tracking started.`,
-                            severity: 'info'
-                        });
-                    }
-
-                    db.run(`UPDATE components SET status = ?, assigned_to = ?, approved_for_uid = NULL WHERE uid = ?`,
-                        [newStatus, assignedTo, realCompUid], function (err) {
-                            if (err) return res.status(500).json({ error: "Database error" });
-
-                            db.run(`INSERT INTO transactions (component_uid, employee_uid, action) VALUES (?, ?, ?)`,
-                                [realCompUid, realEmpUid, newStatus]);
-
-                            broadcastUpdate({
-                                type: 'inventory_update',
-                                component: comp.name,
-                                employee: emp.name,
-                                action: newStatus
-                            });
-
-                            res.status(200).json({ message: `Successfully checked ${newStatus}` });
-                        });
+            if (compRows.length > 1 || empRows.length > 1) {
+                return res.status(409).json({
+                    error: 'Ambiguous scan: scan exactly one employee card and one component tag.'
                 });
+            }
+
+            const comp = compRows[0];
+            const emp = empRows[0];
+            const isCheckingOut = comp.status === 'IN';
+            const newStatus = isCheckingOut ? 'OUT' : 'IN';
+            const assignedTo = isCheckingOut ? emp.name : null;
+
+            if (isCheckingOut) {
+                const trackingMessage = comp.tracker_id
+                    ? `✅ Successful Check-out: ${emp.name} took ${comp.name}. GPS tracking started.`
+                    : `✅ Successful Check-out: ${emp.name} took ${comp.name}. No tracker linked to this component yet.`;
+
+                console.log(`✅ Automatic Checkout: ${emp.name} is taking ${comp.name}`);
+                broadcastUpdate({
+                    type: 'alert',
+                    message: trackingMessage,
+                    severity: 'info'
+                });
+            }
+
+            auditFromRequest(req, {
+                action: isCheckingOut ? 'transaction.checkout' : 'transaction.checkin',
+                entityType: 'component',
+                entityId: comp.uid,
+                details: {
+                    component_uid: comp.uid,
+                    employee_uid: emp.uid,
+                    tracker_id: comp.tracker_id || null
+                }
             });
+
+            db.run(`UPDATE components SET status = ?, assigned_to = ?, approved_for_uid = NULL WHERE uid = ?`,
+                [newStatus, assignedTo, comp.uid], function (updateErr) {
+                    if (updateErr) return res.status(500).json({ error: "Database error" });
+
+                    db.run(`INSERT INTO transactions (component_uid, employee_uid, action) VALUES (?, ?, ?)`,
+                        [comp.uid, emp.uid, newStatus]);
+
+                    broadcastUpdate({
+                        type: 'inventory_update',
+                        component: comp.name,
+                        employee: emp.name,
+                        action: newStatus
+                    });
+
+                    res.status(200).json({
+                        message: `Successfully checked ${newStatus}`,
+                        componentUid: comp.uid,
+                        employeeUid: emp.uid,
+                        componentName: comp.name,
+                        employeeName: emp.name,
+                        trackerId: comp.tracker_id || null,
+                        trackingActive: isCheckingOut && Boolean(comp.tracker_id)
+                    });
+                });
         });
     });
 });
 
 // 2. GPS TRACKER UPDATES (with geofence check)
 app.post('/api/tracking', (req, res) => {
-    const { trackerId, lat, lng } = req.body;
+    const { trackerId, lat, lng, firmwareVersion, accuracyMeters, hdop, speedKmh, headingDegrees } = req.body;
 
     if (!trackerId || !lat || !lng) {
         return res.status(400).json({ error: "Missing GPS data" });
@@ -410,6 +514,17 @@ app.post('/api/tracking', (req, res) => {
         activeTrackers[trackerId].lng = finalLng;
     }
 
+    activeTrackers[trackerId].lastSeen = new Date().toISOString();
+    activeTrackers[trackerId].firmwareVersion = firmwareVersion || activeTrackers[trackerId].firmwareVersion || 'unknown';
+    const parsedAccuracy = Number(accuracyMeters);
+    const parsedHdop = Number(hdop);
+    const parsedSpeed = Number(speedKmh);
+    const parsedHeading = Number(headingDegrees);
+    activeTrackers[trackerId].accuracyMeters = Number.isFinite(parsedAccuracy) && parsedAccuracy > 0 ? parsedAccuracy : activeTrackers[trackerId].accuracyMeters || null;
+    activeTrackers[trackerId].hdop = Number.isFinite(parsedHdop) && parsedHdop > 0 ? parsedHdop : activeTrackers[trackerId].hdop || null;
+    activeTrackers[trackerId].speedKmh = Number.isFinite(parsedSpeed) && parsedSpeed >= 0 ? parsedSpeed : activeTrackers[trackerId].speedKmh || null;
+    activeTrackers[trackerId].headingDegrees = Number.isFinite(parsedHeading) && parsedHeading >= 0 ? parsedHeading : activeTrackers[trackerId].headingDegrees || null;
+
     console.log(`Smoothed GPS   -> Lat: ${finalLat.toFixed(6)}, Lng: ${finalLng.toFixed(6)}`);
 
     // Log to DB (using the smoothed coordinates for cleaner history)
@@ -430,12 +545,64 @@ app.post('/api/tracking', (req, res) => {
         trackerId,
         lat: finalLat,
         lng: finalLng,
+        firmwareVersion: activeTrackers[trackerId].firmwareVersion,
+        accuracyMeters: activeTrackers[trackerId].accuracyMeters,
+        hdop: activeTrackers[trackerId].hdop,
+        speedKmh: activeTrackers[trackerId].speedKmh,
+        headingDegrees: activeTrackers[trackerId].headingDegrees,
+        lastSeen: activeTrackers[trackerId].lastSeen,
         distanceFromZone: Math.round(distFromZone),
         isOutsideGeofence,
         timestamp: new Date().toISOString()
     });
 
     res.status(200).json({ message: "Location received", distanceFromZone: Math.round(distFromZone), isOutsideGeofence });
+});
+
+// 2b. DEVICE HEALTH (Tracker health + firmware visibility)
+app.get('/api/devices/health', requireRole('manager'), (req, res) => {
+    db.all(`SELECT id, uid, tracker_id, name, status, assigned_to FROM components WHERE tracker_id IS NOT NULL AND tracker_id != '' ORDER BY name ASC`, [], (err, components) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        if (!components || components.length === 0) {
+            return res.json({ devices: [] });
+        }
+
+        const results = [];
+        let remaining = components.length;
+
+        components.forEach((component) => {
+            db.get(`SELECT lat, lng, timestamp FROM gps_logs WHERE tracker_id = ? ORDER BY timestamp DESC LIMIT 1`, [component.tracker_id], (gpsErr, gpsRow) => {
+                const runtime = activeTrackers[component.tracker_id] || {};
+                const lastSeen = runtime.lastSeen || gpsRow?.timestamp || null;
+                const lastSeenMs = lastSeen ? new Date(lastSeen).getTime() : 0;
+                const ageMs = lastSeenMs ? (Date.now() - lastSeenMs) : Infinity;
+                const isOnline = ageMs < 120000;
+                const health = isOnline ? 'online' : (lastSeen ? 'stale' : 'offline');
+
+                results.push({
+                    componentUid: component.uid,
+                    componentName: component.name,
+                    trackerId: component.tracker_id,
+                    assignedTo: component.assigned_to,
+                    status: component.status,
+                    firmwareVersion: runtime.firmwareVersion || 'unknown',
+                    lastSeen,
+                    lastLatitude: runtime.lat ?? gpsRow?.lat ?? null,
+                    lastLongitude: runtime.lng ?? gpsRow?.lng ?? null,
+                    locationUpdatedAt: gpsRow?.timestamp || null,
+                    signalStatus: health,
+                    ageSeconds: isFinite(ageMs) ? Math.round(ageMs / 1000) : null
+                });
+
+                remaining -= 1;
+                if (remaining === 0) {
+                    results.sort((a, b) => a.componentName.localeCompare(b.componentName));
+                    res.json({ devices: results });
+                }
+            });
+        });
+    });
 });
 
 // 3. GET INVENTORY STATUS
@@ -668,6 +835,197 @@ app.get('/api/tracking/analytics', (req, res) => {
     });
 });
 
+// 8b. ASSET TIMELINE / REPORTS
+app.get('/api/reports/asset-timeline', requireRole('manager'), (req, res) => {
+    const componentUid = String(req.query.componentUid || '').trim();
+    const trackerId = String(req.query.trackerId || '').trim();
+
+    const finishWithTimeline = (component, tracker, callback) => {
+        const events = [];
+
+        const addEvents = (type, rows, mapFn) => {
+            rows.forEach(row => {
+                const mapped = mapFn(row);
+                if (mapped) events.push(mapped);
+            });
+        };
+
+        const runQueries = () => {
+            db.all(`SELECT t.timestamp, t.action, t.employee_uid, e.name as employee_name, t.component_uid
+                    FROM transactions t
+                    LEFT JOIN employees e ON t.employee_uid = e.uid
+                    WHERE t.component_uid = ?
+                    ORDER BY t.timestamp DESC`, [component.uid], (txErr, transactions) => {
+                if (txErr) return callback(txErr);
+
+                addEvents('transaction', transactions, (row) => ({
+                    type: 'transaction',
+                    timestamp: row.timestamp,
+                    title: row.action === 'OUT' ? 'Checked Out' : 'Checked In',
+                    subtitle: `${row.employee_name || row.employee_uid || 'Unknown'} • ${row.component_uid}`,
+                    severity: row.action === 'OUT' ? 'warning' : 'success',
+                    sourceId: row.component_uid,
+                    meta: { employeeUid: row.employee_uid }
+                }));
+
+                db.all(`SELECT r.timestamp, r.status, r.employee_uid, e.name as employee_name, r.component_uid
+                        FROM requests r
+                        LEFT JOIN employees e ON r.employee_uid = e.uid
+                        WHERE r.component_uid = ?
+                        ORDER BY r.timestamp DESC`, [component.uid], (reqErr, requests) => {
+                    if (reqErr) return callback(reqErr);
+
+                    addEvents('request', requests, (row) => ({
+                        type: 'request',
+                        timestamp: row.timestamp,
+                        title: `Request ${String(row.status || '').toUpperCase()}`,
+                        subtitle: `${row.employee_name || row.employee_uid || 'Unknown'} • ${row.component_uid}`,
+                        severity: row.status === 'approved' ? 'success' : (row.status === 'rejected' ? 'danger' : 'warning'),
+                        sourceId: row.component_uid,
+                        meta: { employeeUid: row.employee_uid, status: row.status }
+                    }));
+
+                    if (tracker && tracker.tracker_id) {
+                        db.all(`SELECT tracker_id, lat, lng, timestamp
+                                FROM gps_logs
+                                WHERE tracker_id = ?
+                                ORDER BY timestamp DESC
+                                LIMIT 300`, [tracker.tracker_id], (gpsErr, gpsRows) => {
+                            if (gpsErr) return callback(gpsErr);
+
+                            addEvents('gps', gpsRows, (row) => ({
+                                type: 'gps',
+                                timestamp: row.timestamp,
+                                title: 'GPS Update',
+                                subtitle: `${row.lat.toFixed(5)}, ${row.lng.toFixed(5)} • ${row.tracker_id}`,
+                                severity: 'info',
+                                sourceId: row.tracker_id,
+                                meta: { lat: row.lat, lng: row.lng }
+                            }));
+
+                            db.all(`SELECT timestamp, actor_username, actor_role, action, entity_type, entity_id, status, details
+                                    FROM audit_logs
+                                    WHERE entity_type = 'component' AND entity_id = ?
+                                    ORDER BY timestamp DESC`, [component.uid], (auditErr, audits) => {
+                                if (auditErr) return callback(auditErr);
+
+                                addEvents('audit', audits, (row) => ({
+                                    type: 'audit',
+                                    timestamp: row.timestamp,
+                                    title: row.action,
+                                    subtitle: `${row.actor_username || 'system'} • ${row.actor_role || 'operator'}`,
+                                    severity: row.status === 'success' ? 'success' : 'danger',
+                                    sourceId: row.entity_id,
+                                    meta: row.details ? { details: row.details } : {}
+                                }));
+
+                                events.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+                                const summary = {
+                                    totalEvents: events.length,
+                                    transactions: transactions.length,
+                                    requests: requests.length,
+                                    gpsPoints: tracker && tracker.tracker_id ? gpsRows.length : 0,
+                                    audits: audits.length,
+                                    componentStatus: component.status,
+                                    assignedTo: component.assigned_to || null,
+                                    trackerId: tracker ? tracker.tracker_id : null
+                                };
+
+                                callback(null, {
+                                    component: {
+                                        uid: component.uid,
+                                        name: component.name,
+                                        status: component.status,
+                                        assignedTo: component.assigned_to || null,
+                                        trackerId: tracker ? tracker.tracker_id : null
+                                    },
+                                    summary,
+                                    events
+                                });
+                            });
+                        });
+                    } else {
+                        db.all(`SELECT timestamp, actor_username, actor_role, action, entity_type, entity_id, status, details
+                                FROM audit_logs
+                                WHERE entity_type = 'component' AND entity_id = ?
+                                ORDER BY timestamp DESC`, [component.uid], (auditErr, audits) => {
+                            if (auditErr) return callback(auditErr);
+
+                            addEvents('audit', audits, (row) => ({
+                                type: 'audit',
+                                timestamp: row.timestamp,
+                                title: row.action,
+                                subtitle: `${row.actor_username || 'system'} • ${row.actor_role || 'operator'}`,
+                                severity: row.status === 'success' ? 'success' : 'danger',
+                                sourceId: row.entity_id,
+                                meta: row.details ? { details: row.details } : {}
+                            }));
+
+                            events.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+                            callback(null, {
+                                component: {
+                                    uid: component.uid,
+                                    name: component.name,
+                                    status: component.status,
+                                    assignedTo: component.assigned_to || null,
+                                    trackerId: null
+                                },
+                                summary: {
+                                    totalEvents: events.length,
+                                    transactions: transactions.length,
+                                    requests: requests.length,
+                                    gpsPoints: 0,
+                                    audits: audits.length,
+                                    componentStatus: component.status,
+                                    assignedTo: component.assigned_to || null,
+                                    trackerId: null
+                                },
+                                events
+                            });
+                        });
+                    }
+                });
+            });
+        };
+
+        runQueries();
+    };
+
+    if (!componentUid && !trackerId) {
+        return res.status(400).json({ error: 'Provide componentUid or trackerId' });
+    }
+
+    if (componentUid) {
+        db.get(`SELECT * FROM components WHERE uid = ?`, [componentUid], (err, component) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (!component) return res.status(404).json({ error: 'Component not found' });
+
+            let tracker = null;
+            if (component.tracker_id) {
+                tracker = { tracker_id: component.tracker_id };
+            }
+
+            finishWithTimeline(component, tracker, (timelineErr, payload) => {
+                if (timelineErr) return res.status(500).json({ error: timelineErr.message });
+                res.json(payload);
+            });
+        });
+        return;
+    }
+
+    db.get(`SELECT * FROM components WHERE tracker_id = ?`, [trackerId], (err, component) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!component) return res.status(404).json({ error: 'No component mapped to this trackerId' });
+
+        finishWithTimeline(component, { tracker_id: trackerId }, (timelineErr, payload) => {
+            if (timelineErr) return res.status(500).json({ error: timelineErr.message });
+            res.json(payload);
+        });
+    });
+});
+
 // ==========================================
 // ADMIN APPROVAL WORKFLOW API
 // ==========================================
@@ -755,4 +1113,21 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log(`Dashboard available at http://localhost:${PORT}/`);
     console.log(`=========================================`);
+
+    // Log current database state for verification
+    setTimeout(() => {
+        db.all(`SELECT uid, name FROM employees`, [], (err, rows) => {
+            if (!err && rows) {
+                console.log(`\n📋 Registered Employees (${rows.length}):`);
+                rows.forEach(r => console.log(`   - ${r.uid} → ${r.name}`));
+            }
+        });
+        db.all(`SELECT uid, name, tracker_id, status, assigned_to FROM components`, [], (err, rows) => {
+            if (!err && rows) {
+                console.log(`📦 Registered Components (${rows.length}):`);
+                rows.forEach(r => console.log(`   - ${r.uid} → ${r.name} [${r.status}] tracker=${r.tracker_id || 'none'} assigned=${r.assigned_to || 'none'}`));
+                console.log('');
+            }
+        });
+    }, 1000);
 });

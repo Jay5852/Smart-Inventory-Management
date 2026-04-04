@@ -137,6 +137,13 @@
                 });
 
                 if (res.ok) {
+                    const data = await res.json();
+                    if (data.token) {
+                        sessionStorage.setItem('synctrack_token', data.token);
+                        sessionStorage.setItem('synctrack_role', data.role || 'operator');
+                        sessionStorage.setItem('synctrack_username', data.username || u);
+                        sessionStorage.setItem('synctrack_display_name', data.displayName || data.username || u);
+                    }
                     window.location.href = '/';
                 } else {
                     showToast('Invalid credentials', 'alert');

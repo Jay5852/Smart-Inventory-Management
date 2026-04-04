@@ -175,6 +175,15 @@ nav a.active {
     justify-content: flex-end;
 }
 
+.command-user {
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: rgba(255, 255, 255, 0.02);
+}
+
 .command-live {
     color: var(--success);
     font-size: 0.82rem;
@@ -426,10 +435,44 @@ header {
     overflow: hidden;
 }
 
+.live-map-header {
+    padding-bottom: 16px;
+}
+
+.map-status-chip {
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(58, 160, 243, 0.22);
+    background: rgba(58, 160, 243, 0.1);
+    color: #d9edff;
+    font-size: 0.78rem;
+    letter-spacing: 0.03em;
+}
+
 .full-map-container {
     height: 500px;
     width: 100%;
     z-index: 1;
+}
+
+.map-toolbar {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 14px 24px 22px;
+    border-top: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), rgba(255, 255, 255, 0));
+}
+
+.map-toolbar .btn-primary,
+.map-toolbar .btn-secondary {
+    padding: 9px 14px;
+    font-size: 0.88rem;
+}
+
+.live-map-hint {
+    color: var(--text-muted);
+    font-size: 0.82rem;
 }
 
 .leaflet-container {
@@ -439,7 +482,7 @@ header {
 /* --- TRACKING INFO BAR --- */
 .tracking-info-bar {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 16px;
     margin-bottom: 24px;
 }
@@ -554,6 +597,81 @@ header {
     border: 1px solid var(--border);
     border-radius: 12px;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0));
+}
+
+.report-stats-grid {
+    margin-bottom: 24px;
+}
+
+.badge-soft {
+    background: rgba(58, 160, 243, 0.12);
+    color: #b9dcff;
+    border: 1px solid rgba(58, 160, 243, 0.18);
+}
+
+.timeline-container {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 24px 24px;
+}
+
+.timeline-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-secondary);
+    border: 1px dashed var(--border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.timeline-item {
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.timeline-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(58, 160, 243, 0.16), rgba(47, 196, 141, 0.12));
+    border: 1px solid rgba(58, 160, 243, 0.2);
+    color: var(--text-primary);
+    font-size: 1rem;
+    box-shadow: 0 10px 20px rgba(3, 12, 20, 0.24);
+}
+
+.timeline-card {
+    background: linear-gradient(180deg, var(--card-bg), var(--card-bg-soft));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    box-shadow: 0 12px 26px rgba(3, 12, 20, 0.2);
+}
+
+.timeline-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+
+.timeline-meta {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-bottom: 6px;
+}
+
+.timeline-detail {
+    color: var(--text-secondary);
+    line-height: 1.5;
+    font-size: 0.92rem;
 }
 
 /* --- GEOFENCE ALERT BANNER --- */
@@ -747,6 +865,14 @@ header {
 
 .toast .toast-close:hover {
     color: var(--text-primary);
+}
+
+.role-disabled {
+    opacity: 0.5;
+}
+
+.device-health-stats {
+    margin-bottom: 18px;
 }
 
 @keyframes slideUp {

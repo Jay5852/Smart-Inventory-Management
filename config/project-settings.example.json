@@ -3,7 +3,7 @@
   "server": {
     "host": "0.0.0.0",
     "port": 3000,
-    "baseUrl": "http://192.168.0.167:3000"
+    "baseUrl": "http://10.13.125.209:3000"
   },
   "dashboard": {
     "loginUrl": "http://localhost:3000/login.html",
@@ -13,15 +13,15 @@
     "defaultManagerPassword": "manager"
   },
   "rfidReaderFirmware": {
-    "serverIp": "192.168.0.167",
+    "serverIp": "10.13.125.209",
     "serverPort": 3000,
     "wifiBootstrapNote": "Use the dashboard Wi-Fi profiles and the gate reader Wi-Fi menu"
   },
   "gpsTrackerFirmware": {
     "trackerId": "COMP-ROUTER-001",
-    "ssid": "Jay",
-    "password": "12345678",
-    "serverHost": "192.168.0.167",
+    "ssid": "VISHAL",
+    "password": "11111111",
+    "serverHost": "10.13.125.209",
     "serverPort": 3000
   },
   "defaultDatabaseRecords": {

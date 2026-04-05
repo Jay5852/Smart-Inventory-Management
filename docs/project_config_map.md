@@ -16,11 +16,11 @@ This file is the single handoff reference for anyone moving the project to anoth
 
 ## Current Live Defaults
 
-- **Server IP:** `192.168.0.167`
+- **Server IP:** `10.13.125.209`
 - **Server port:** `3000`
 - **GPS tracker ID:** `COMP-ROUTER-001`
-- **GPS tracker SSID:** `Jay`
-- **GPS tracker password:** `12345678`
+- **GPS tracker SSID:** `VISHAL`
+- **GPS tracker password:** `11111111`
 - **Admin login:** `admin / admin`
 - **Manager login:** `manager / manager`
 - **Default employee UID:** `2458CA2B`

@@ -122,7 +122,40 @@ function auditFromRequest(req, event) {
     });
 }
 
-// Serve the dashboard statically
+function normalizeUid(uid) {
+    return String(uid || '').trim().toUpperCase();
+}
+
+function getUidPresence(uid, callback) {
+    db.get(`SELECT uid FROM employees WHERE uid = ?`, [uid], (empErr, empRow) => {
+        if (empErr) {
+            callback(empErr);
+            return;
+        }
+
+        db.get(`SELECT uid FROM components WHERE uid = ?`, [uid], (compErr, compRow) => {
+            if (compErr) {
+                callback(compErr);
+                return;
+            }
+
+            callback(null, {
+                inEmployees: Boolean(empRow),
+                inComponents: Boolean(compRow)
+            });
+        });
+    });
+}
+
+// Serve home landing first, then static assets and dashboard pages
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dashboard/home.html'));
+});
+
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dashboard/index.html'));
+});
+
 app.use(express.static(path.join(__dirname, '../dashboard')));
 
 // ==========================================
@@ -189,28 +222,59 @@ app.get('/api/auth/me', requireRole('operator'), (req, res) => {
 // HARDWARE ENROLLMENT (From ESP32 Gate Reader)
 // ==========================================
 app.post('/api/enroll', (req, res) => {
-    const { uid, type } = req.body;
+    const uid = normalizeUid(req.body?.uid);
+    const type = String(req.body?.type || '').trim().toLowerCase();
     if (!uid || !type) return res.status(400).json({ error: "Missing uid or type" });
 
-    if (type === 'employee') {
-        db.run(`INSERT OR IGNORE INTO employees (uid, name) VALUES (?, ?)`,
-            [uid, 'New Employee (Edit via Dashboard)'], function (err) {
-                if (err) return res.status(500).json({ error: err.message });
-                broadcastUpdate({ type: 'alert', message: `🆕 New Employee Card enrolled from Gate: ${uid}`, severity: 'info' });
-                broadcastUpdate({ type: 'inventory_update' });
-                res.status(201).json({ message: "Employee enrolled", uid });
+    getUidPresence(uid, (presenceErr, presence) => {
+        if (presenceErr) {
+            return res.status(500).json({ error: presenceErr.message });
+        }
+
+        if (type === 'employee' && presence.inComponents) {
+            return res.status(409).json({
+                error: `UID ${uid} already exists as a component. One UID cannot be both employee and component.`
             });
-    } else if (type === 'component') {
-        db.run(`INSERT OR IGNORE INTO components (uid, name, status) VALUES (?, ?, 'IN')`,
-            [uid, 'New Component (Edit via Dashboard)'], function (err) {
-                if (err) return res.status(500).json({ error: err.message });
-                broadcastUpdate({ type: 'alert', message: `🆕 New Component Tag enrolled from Gate: ${uid}`, severity: 'info' });
-                broadcastUpdate({ type: 'inventory_update' });
-                res.status(201).json({ message: "Component enrolled", uid });
+        }
+
+        if (type === 'component' && presence.inEmployees) {
+            return res.status(409).json({
+                error: `UID ${uid} already exists as an employee. One UID cannot be both employee and component.`
             });
-    } else {
-        res.status(400).json({ error: "Invalid type. Use 'employee' or 'component'." });
-    }
+        }
+
+        if (type === 'employee') {
+            db.run(`INSERT OR IGNORE INTO employees (uid, name) VALUES (?, ?)` ,
+                [uid, 'New Employee (Edit via Dashboard)'], function (err) {
+                    if (err) return res.status(500).json({ error: err.message });
+
+                    const created = this.changes > 0;
+                    if (created) {
+                        broadcastUpdate({ type: 'alert', message: `🆕 New Employee Card enrolled from Gate: ${uid}`, severity: 'info' });
+                        broadcastUpdate({ type: 'inventory_update' });
+                        return res.status(201).json({ message: "Employee enrolled", uid, created: true });
+                    }
+
+                    return res.status(200).json({ message: "Employee already enrolled", uid, created: false });
+                });
+        } else if (type === 'component') {
+            db.run(`INSERT OR IGNORE INTO components (uid, name, status) VALUES (?, ?, 'IN')`,
+                [uid, 'New Component (Edit via Dashboard)'], function (err) {
+                    if (err) return res.status(500).json({ error: err.message });
+
+                    const created = this.changes > 0;
+                    if (created) {
+                        broadcastUpdate({ type: 'alert', message: `🆕 New Component Tag enrolled from Gate: ${uid}`, severity: 'info' });
+                        broadcastUpdate({ type: 'inventory_update' });
+                        return res.status(201).json({ message: "Component enrolled", uid, created: true });
+                    }
+
+                    return res.status(200).json({ message: "Component already enrolled", uid, created: false });
+                });
+        } else {
+            res.status(400).json({ error: "Invalid type. Use 'employee' or 'component'." });
+        }
+    });
 });
 
 // ==========================================
@@ -388,7 +452,8 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
 
 // 1. RFID GATE SCANNER (Check in / Check out)
 app.post('/api/transactions/scan', (req, res) => {
-    const { componentUid, employeeUid } = req.body;
+    const componentUid = normalizeUid(req.body?.componentUid);
+    const employeeUid = normalizeUid(req.body?.employeeUid);
     console.log(`[SCAN] Scan API called. componentUid=${componentUid}, employeeUid=${employeeUid}, time=${new Date().toISOString()}`);
 
     if (!componentUid || !employeeUid) {
@@ -615,18 +680,30 @@ app.get('/api/inventory', (req, res) => {
 
 // 3a. ADD COMPONENT
 app.post('/api/components', requireRole('manager'), (req, res) => {
-    const { uid, tracker_id, name } = req.body;
+    const uid = normalizeUid(req.body?.uid);
+    const tracker_id = String(req.body?.tracker_id || '').trim();
+    const name = String(req.body?.name || '').trim();
     if (!uid || !name) return res.status(400).json({ error: "Missing uid or name" });
-    db.run(`INSERT INTO components (uid, tracker_id, name) VALUES (?, ?, ?)`, [uid, tracker_id || null, name], function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-        auditFromRequest(req, {
-            action: 'component.create',
-            entityType: 'component',
-            entityId: uid,
-            details: { name, tracker_id: tracker_id || null }
+
+    getUidPresence(uid, (presenceErr, presence) => {
+        if (presenceErr) return res.status(500).json({ error: presenceErr.message });
+        if (presence.inEmployees) {
+            return res.status(409).json({
+                error: `UID ${uid} is already used by an employee card. Use a unique RFID UID for component tags.`
+            });
+        }
+
+        db.run(`INSERT INTO components (uid, tracker_id, name) VALUES (?, ?, ?)`, [uid, tracker_id || null, name], function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            auditFromRequest(req, {
+                action: 'component.create',
+                entityType: 'component',
+                entityId: uid,
+                details: { name, tracker_id: tracker_id || null }
+            });
+            broadcastUpdate({ type: 'inventory_update', action: 'component_added', component: name, componentUid: uid });
+            res.status(201).json({ message: "Component added successfully" });
         });
-        broadcastUpdate({ type: 'inventory_update', action: 'component_added', component: name, componentUid: uid });
-        res.status(201).json({ message: "Component added successfully" });
     });
 });
 
@@ -654,18 +731,29 @@ app.get('/api/employees', (req, res) => {
 
 // 4a. ADD EMPLOYEE
 app.post('/api/employees', requireRole('manager'), (req, res) => {
-    const { uid, name } = req.body;
+    const uid = normalizeUid(req.body?.uid);
+    const name = String(req.body?.name || '').trim();
     if (!uid || !name) return res.status(400).json({ error: "Missing uid or name" });
-    db.run(`INSERT INTO employees (uid, name) VALUES (?, ?)`, [uid, name], function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-        auditFromRequest(req, {
-            action: 'employee.create',
-            entityType: 'employee',
-            entityId: uid,
-            details: { name }
+
+    getUidPresence(uid, (presenceErr, presence) => {
+        if (presenceErr) return res.status(500).json({ error: presenceErr.message });
+        if (presence.inComponents) {
+            return res.status(409).json({
+                error: `UID ${uid} is already used by a component tag. Use a unique RFID UID for employee cards.`
+            });
+        }
+
+        db.run(`INSERT INTO employees (uid, name) VALUES (?, ?)`, [uid, name], function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            auditFromRequest(req, {
+                action: 'employee.create',
+                entityType: 'employee',
+                entityId: uid,
+                details: { name }
+            });
+            broadcastUpdate({ type: 'inventory_update', action: 'employee_added', employee: name, employeeUid: uid });
+            res.status(201).json({ message: "Employee added successfully" });
         });
-        broadcastUpdate({ type: 'inventory_update', action: 'employee_added', employee: name, employeeUid: uid });
-        res.status(201).json({ message: "Employee added successfully" });
     });
 });
 

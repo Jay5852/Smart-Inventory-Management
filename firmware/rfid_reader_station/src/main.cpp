@@ -15,8 +15,10 @@ Preferences prefs; // Non-volatile storage (like EEPROM but better)
 // GLOBAL STATE
 // ==========================================
 String adminCardUID = "";
-String serverIP = "192.168.0.167"; // Current PC LAN IP on Wi-Fi
+String serverIP = "10.13.125.209"; // Current PC LAN IP on Wi-Fi
 int serverPort = 3000;
+bool useGatewayServer = true;
+String lastKnownServerHost = "";
 
 enum AppMode { MODE_FIRST_BOOT, MODE_NORMAL, MODE_HOME_MENU, MODE_ADMIN_MENU };
 AppMode appMode = MODE_NORMAL;
@@ -36,9 +38,9 @@ const unsigned long RFID_DUPLICATE_WINDOW_MS = 1500;
 
 // Home Menu
 int homeMenuIndex = 0;
-const int HOME_MENU_ITEMS = 4;
+const int HOME_MENU_ITEMS = 5;
 const char *homeMenuLabels[] = {"Resume Scan", "WiFi Connect", "Admin Access",
-                                "Exit"};
+                                "Server Config", "Exit"};
 
 // Admin Menu
 int menuIndex = 0;
@@ -73,13 +75,27 @@ bool consumeButtonPress(uint8_t pin, unsigned long debounceMs = 35,
 String pollRFIDCard();
 String getWiFiLabel();
 void openHomeWiFiMenu();
+void openServerConfigMenu();
+void processSerialConfigCommands();
+void printServerConfigHelp();
+void printServerConfigStatus();
+void saveServerSettings();
+void loadServerSettings();
+String getActiveServerHost();
+String getGatewayServerHost();
+bool postJsonToServerAuto(const String &path, const String &payload, int &code,
+                          String &response);
+bool getFromServerAuto(const String &path, int &code, String &response);
 
 // ==========================================
 // SETUP
 // ==========================================
 void setup() {
   Serial.begin(115200);
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true, true);
+  delay(100);
   WiFi.setAutoReconnect(true);
 
   initButtons();
@@ -91,6 +107,7 @@ void setup() {
   prefs.begin("inventory", false);
   adminCardUID = prefs.getString("adminUID", "");
   loadWifiProfiles(prefs, wifiProfiles, wifiProfileCount);
+  loadServerSettings();
 
   // ---- FIRST BOOT CHECK ----
   if (adminCardUID == "") {
@@ -114,6 +131,7 @@ void setup() {
 // ==========================================
 void loop() {
   logButtonStateChanges();
+  processSerialConfigCommands();
 
   if (scanState == SCAN_FIRST && appMode == MODE_NORMAL &&
       consumeButtonPress(BTN_SELECT)) {
@@ -304,6 +322,9 @@ void handleHomeMenuAction() {
     enterSetupAccess();
     break;
   case 3:
+    openServerConfigMenu();
+    break;
+  case 4:
     appMode = MODE_NORMAL;
     break;
   }
@@ -447,24 +468,19 @@ void enrollCard(const char *type) {
 
   // Send to server
   if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-    String url =
-        "http://" + serverIP + ":" + String(serverPort) + "/api/enroll";
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
-
     String payload =
         "{\"uid\":\"" + uid + "\",\"type\":\"" + String(type) + "\"}";
-    int code = http.POST(payload);
+    int code = -1;
+    String resp;
+    bool reachedServer =
+        postJsonToServerAuto("/api/enroll", payload, code, resp);
 
-    if (code == 200 || code == 201) {
+    if (reachedServer && (code == 200 || code == 201)) {
       showMessage("ENROLLED!", uid, String(type) + " registered!");
       beep(2);
     } else {
-      String resp = http.getString();
       showMessage("FAILED!", "Code: " + String(code), resp.substring(0, 20));
     }
-    http.end();
   } else {
     showMessage("NO WiFi!", "Connect first", "via Fetch WiFi");
   }
@@ -514,15 +530,12 @@ bool fetchWiFiFromServerInternal(bool interactiveOpenNetwork, bool showUi) {
     Serial.println("[WiFi] Connected to bootstrap network. Fetching profiles.");
   }
 
-  HTTPClient http;
-  String url =
-      "http://" + serverIP + ":" + String(serverPort) + "/api/wifi-config";
-  http.begin(url);
-  int code = http.GET();
+  int code = -1;
+  String resp;
+  bool reachedServer = getFromServerAuto("/api/wifi-config", code, resp);
   bool fetchSuccess = false;
 
-  if (code == 200) {
-    String resp = http.getString();
+  if (reachedServer && code == 200) {
 
     WifiProfile fetchedProfiles[MAX_WIFI_PROFILES];
     uint8_t fetchedCount = 0;
@@ -564,7 +577,6 @@ bool fetchWiFiFromServerInternal(bool interactiveOpenNetwork, bool showUi) {
     }
   }
 
-  http.end();
   if (!fetchSuccess && wifiProfileCount == 0 && WiFi.status() == WL_CONNECTED) {
     WiFi.disconnect();
   }
@@ -697,6 +709,318 @@ String getWiFiLabel() {
   }
 
   return "No profile";
+}
+
+String getActiveServerHost() {
+  if (useGatewayServer && WiFi.status() == WL_CONNECTED) {
+    IPAddress gateway = WiFi.gatewayIP();
+    if (!(gateway[0] == 0 && gateway[1] == 0 && gateway[2] == 0 &&
+          gateway[3] == 0)) {
+      return gateway.toString();
+    }
+  }
+
+  return serverIP;
+}
+
+void saveServerSettings() {
+  prefs.putString("serverHost", serverIP);
+  prefs.putInt("serverPort", serverPort);
+  prefs.putBool("serverUseGw", useGatewayServer);
+  prefs.putString("serverLast", lastKnownServerHost);
+}
+
+void loadServerSettings() {
+  serverIP = prefs.getString("serverHost", serverIP);
+  serverPort = prefs.getInt("serverPort", serverPort);
+  useGatewayServer = prefs.getBool("serverUseGw", true);
+  lastKnownServerHost = prefs.getString("serverLast", "");
+}
+
+String getGatewayServerHost() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return "";
+  }
+
+  IPAddress gateway = WiFi.gatewayIP();
+  if (gateway[0] == 0 && gateway[1] == 0 && gateway[2] == 0 && gateway[3] == 0) {
+    return "";
+  }
+
+  return gateway.toString();
+}
+
+bool postJsonToServerAuto(const String &path, const String &payload, int &code,
+                          String &response) {
+  String candidates[3];
+  int candidateCount = 0;
+
+  auto addCandidate = [&](const String &host) {
+    if (host == "") {
+      return;
+    }
+    for (int index = 0; index < candidateCount; index++) {
+      if (candidates[index] == host) {
+        return;
+      }
+    }
+    if (candidateCount < 3) {
+      candidates[candidateCount++] = host;
+    }
+  };
+
+  addCandidate(lastKnownServerHost);
+  if (useGatewayServer) {
+    addCandidate(getGatewayServerHost());
+  }
+  addCandidate(serverIP);
+
+  code = -1;
+  response = "";
+
+  for (int index = 0; index < candidateCount; index++) {
+    String host = candidates[index];
+    String url = "http://" + host + ":" + String(serverPort) + path;
+
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    code = http.POST(payload);
+    response = code > 0 ? http.getString() : "";
+    http.end();
+
+    if (code > 0) {
+      if (lastKnownServerHost != host) {
+        lastKnownServerHost = host;
+        prefs.putString("serverLast", lastKnownServerHost);
+      }
+      Serial.println("[ServerCfg] Auto host " + host + " code=" +
+                     String(code));
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool getFromServerAuto(const String &path, int &code, String &response) {
+  String candidates[3];
+  int candidateCount = 0;
+
+  auto addCandidate = [&](const String &host) {
+    if (host == "") {
+      return;
+    }
+    for (int index = 0; index < candidateCount; index++) {
+      if (candidates[index] == host) {
+        return;
+      }
+    }
+    if (candidateCount < 3) {
+      candidates[candidateCount++] = host;
+    }
+  };
+
+  addCandidate(lastKnownServerHost);
+  if (useGatewayServer) {
+    addCandidate(getGatewayServerHost());
+  }
+  addCandidate(serverIP);
+
+  code = -1;
+  response = "";
+
+  for (int index = 0; index < candidateCount; index++) {
+    String host = candidates[index];
+    String url = "http://" + host + ":" + String(serverPort) + path;
+
+    HTTPClient http;
+    http.begin(url);
+    code = http.GET();
+    response = code > 0 ? http.getString() : "";
+    http.end();
+
+    if (code > 0) {
+      if (lastKnownServerHost != host) {
+        lastKnownServerHost = host;
+        prefs.putString("serverLast", lastKnownServerHost);
+      }
+      Serial.println("[ServerCfg] Auto host " + host + " code=" +
+                     String(code));
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void printServerConfigStatus() {
+  String activeHost = getActiveServerHost();
+  Serial.println("[ServerCfg] --- Current Endpoint ---");
+  Serial.println("[ServerCfg] Mode: " +
+                 String(useGatewayServer ? "GATEWAY" : "MANUAL"));
+  Serial.println("[ServerCfg] Manual host: " + serverIP);
+  Serial.println("[ServerCfg] Last good: " +
+                 String(lastKnownServerHost == "" ? "(none)"
+                                                  : lastKnownServerHost));
+  Serial.println("[ServerCfg] Active host: " + activeHost);
+  Serial.println("[ServerCfg] Port: " + String(serverPort));
+}
+
+void printServerConfigHelp() {
+  Serial.println("[ServerCfg] Commands:");
+  Serial.println("[ServerCfg] SHOW");
+  Serial.println("[ServerCfg] MODE GATEWAY");
+  Serial.println("[ServerCfg] MODE MANUAL");
+  Serial.println("[ServerCfg] HOST <ip-or-host>");
+  Serial.println("[ServerCfg] PORT <1-65535>");
+  Serial.println("[ServerCfg] HELP");
+}
+
+void processSerialConfigCommands() {
+  if (!Serial.available()) {
+    return;
+  }
+
+  String raw = Serial.readStringUntil('\n');
+  raw.trim();
+  if (raw == "") {
+    return;
+  }
+
+  String command = raw;
+  command.toUpperCase();
+
+  if (command == "HELP") {
+    printServerConfigHelp();
+    return;
+  }
+
+  if (command == "SHOW") {
+    printServerConfigStatus();
+    return;
+  }
+
+  if (command == "MODE GATEWAY") {
+    useGatewayServer = true;
+    saveServerSettings();
+    Serial.println("[ServerCfg] Mode set to GATEWAY.");
+    printServerConfigStatus();
+    return;
+  }
+
+  if (command == "MODE MANUAL") {
+    useGatewayServer = false;
+    saveServerSettings();
+    Serial.println("[ServerCfg] Mode set to MANUAL.");
+    printServerConfigStatus();
+    return;
+  }
+
+  if (command.startsWith("HOST ")) {
+    String hostValue = raw.substring(5);
+    hostValue.trim();
+    if (hostValue == "") {
+      Serial.println("[ServerCfg] Host cannot be empty.");
+      return;
+    }
+
+    serverIP = hostValue;
+    useGatewayServer = false;
+    saveServerSettings();
+    Serial.println("[ServerCfg] Manual host updated.");
+    printServerConfigStatus();
+    return;
+  }
+
+  if (command.startsWith("PORT ")) {
+    String portString = raw.substring(5);
+    portString.trim();
+    int parsedPort = portString.toInt();
+    if (parsedPort <= 0 || parsedPort > 65535) {
+      Serial.println("[ServerCfg] Invalid port. Use 1-65535.");
+      return;
+    }
+
+    serverPort = parsedPort;
+    saveServerSettings();
+    Serial.println("[ServerCfg] Port updated.");
+    printServerConfigStatus();
+    return;
+  }
+
+  Serial.println("[ServerCfg] Unknown command. Type HELP.");
+}
+
+void openServerConfigMenu() {
+  const int SERVER_MENU_ITEMS = 4;
+  const char *serverMenu[] = {"Toggle Mode", "Show Endpoint", "Serial Help",
+                              "Back"};
+  int serverMenuIndex = 0;
+
+  waitForButtonRelease(2000);
+
+  while (true) {
+    logButtonStateChanges();
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("=== SERVER CFG ===");
+    display.print("Mode: ");
+    display.println(useGatewayServer ? "GATEWAY" : "MANUAL");
+    display.print("Host: ");
+    display.println(getActiveServerHost().substring(0, 18));
+    display.print("Port: ");
+    display.println(String(serverPort));
+
+    for (int i = 0; i < SERVER_MENU_ITEMS; i++) {
+      display.print(i == serverMenuIndex ? "> " : "  ");
+      display.println(serverMenu[i]);
+    }
+
+    display.display();
+
+    if (consumeButtonPress(BTN_UP)) {
+      serverMenuIndex =
+          (serverMenuIndex - 1 + SERVER_MENU_ITEMS) % SERVER_MENU_ITEMS;
+      continue;
+    }
+
+    if (consumeButtonPress(BTN_DOWN)) {
+      serverMenuIndex = (serverMenuIndex + 1) % SERVER_MENU_ITEMS;
+      continue;
+    }
+
+    if (consumeButtonPress(BTN_SETUP)) {
+      return;
+    }
+
+    if (!consumeButtonPress(BTN_SELECT)) {
+      delay(20);
+      continue;
+    }
+
+    if (serverMenuIndex == 0) {
+      useGatewayServer = !useGatewayServer;
+      saveServerSettings();
+      showMessage("Server Mode", useGatewayServer ? "GATEWAY" : "MANUAL",
+                  "Saved");
+      delay(900);
+    } else if (serverMenuIndex == 1) {
+      showMessage("Endpoint", getActiveServerHost(),
+                  "Port " + String(serverPort));
+      delay(1200);
+    } else if (serverMenuIndex == 2) {
+      showMessage("USB Serial Cmds", "HELP / SHOW", "MODE HOST PORT");
+      printServerConfigHelp();
+      delay(1200);
+    } else {
+      return;
+    }
+
+    waitForButtonRelease(1200);
+  }
 }
 
 void openHomeWiFiMenu() {
@@ -869,20 +1193,16 @@ void sendScanToServer() {
     return;
   }
 
-  HTTPClient http;
-  String url = "http://" + serverIP + ":" + String(serverPort) +
-               "/api/transactions/scan";
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-
   String payload = "{\"componentUid\":\"" + scannedID1 +
                    "\",\"employeeUid\":\"" + scannedID2 + "\"}";
   Serial.println("Sending: " + payload);
 
-  int code = http.POST(payload);
+  int code = -1;
+  String response;
+  bool reachedServer =
+      postJsonToServerAuto("/api/transactions/scan", payload, code, response);
 
-  if (code > 0) {
-    String response = http.getString();
+  if (reachedServer && code > 0) {
     Serial.println("Response: " + String(code) + " " + response);
 
     if (code == 200 || code == 201) {
@@ -903,7 +1223,6 @@ void sendScanToServer() {
     digitalWrite(BUZZER_PIN, LOW);
   }
 
-  http.end();
   delay(2500);
   scanState = SCAN_FIRST;
   resetScreen();

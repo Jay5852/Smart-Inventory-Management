@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <ArduinoHttpClient.h>
+#include <Preferences.h>
 #include <TinyGPSPlus.h>
 #include <TinyGsmClient.h>
 #include <WiFi.h>
@@ -20,15 +21,17 @@ const unsigned long WIFI_RETRY_INTERVAL_MS = 30000;
 const float UNUSABLE_HDOP_SENTINEL = 90.0f;
 
 // --- Networking Credentials ---
-const char *ssid = "Jay";
-const char *password = "12345678";
+String wifiSsid = "VISHAL";
+String wifiPassword = "11111111";
 const char apn[] = "internet"; // Standard APN
 const char gprsUser[] = "";
 const char gprsPass[] = "";
 
 // --- Server API Endpoint ---
-const char *serverHost = "192.168.0.167"; // Current PC LAN IP on Wi-Fi
-const int serverPort = 3000;
+String configuredServerHost = "10.13.125.209"; // Manual fallback host
+int configuredServerPort = 3000;
+bool useGatewayServer = true;
+String lastKnownServerHost = "";
 const char *serverPath = "/api/tracking";
 
 // --- Hardware Serial Definitions ---
@@ -47,6 +50,276 @@ unsigned long lastGpsDiagTime = 0;
 unsigned long lastWifiRetryTime = 0;
 unsigned long lastGpsRejectLogTime = 0;
 uint32_t gpsBytesSeen = 0;
+Preferences prefs;
+
+void connectToWifiStation();
+String getGatewayServerHost();
+int buildServerCandidates(String candidates[], int maxCandidates);
+int sendPayloadOverWiFiAuto(const String &payload, String &usedHost);
+int sendPayloadOverGsmAuto(const String &payload, String &usedHost);
+
+void saveRuntimeConfig() {
+  prefs.putString("ssid", wifiSsid);
+  prefs.putString("password", wifiPassword);
+  prefs.putString("serverHost", configuredServerHost);
+  prefs.putInt("serverPort", configuredServerPort);
+  prefs.putBool("serverUseGw", useGatewayServer);
+  prefs.putString("serverLast", lastKnownServerHost);
+}
+
+void loadRuntimeConfig() {
+  wifiSsid = prefs.getString("ssid", wifiSsid);
+  wifiPassword = prefs.getString("password", wifiPassword);
+  configuredServerHost = prefs.getString("serverHost", configuredServerHost);
+  configuredServerPort = prefs.getInt("serverPort", configuredServerPort);
+  useGatewayServer = prefs.getBool("serverUseGw", true);
+  lastKnownServerHost = prefs.getString("serverLast", "");
+}
+
+String getGatewayServerHost() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return "";
+  }
+
+  IPAddress gateway = WiFi.gatewayIP();
+  if (gateway[0] == 0 && gateway[1] == 0 && gateway[2] == 0 && gateway[3] == 0) {
+    return "";
+  }
+
+  return gateway.toString();
+}
+
+int buildServerCandidates(String candidates[], int maxCandidates) {
+  int candidateCount = 0;
+
+  auto addCandidate = [&](const String &host) {
+    if (host == "") {
+      return;
+    }
+
+    for (int index = 0; index < candidateCount; index++) {
+      if (candidates[index] == host) {
+        return;
+      }
+    }
+
+    if (candidateCount < maxCandidates) {
+      candidates[candidateCount++] = host;
+    }
+  };
+
+  addCandidate(lastKnownServerHost);
+  if (useGatewayServer) {
+    addCandidate(getGatewayServerHost());
+  }
+  addCandidate(configuredServerHost);
+
+  return candidateCount;
+}
+
+int sendPayloadOverWiFiAuto(const String &payload, String &usedHost) {
+  String candidates[3];
+  int candidateCount = buildServerCandidates(candidates, 3);
+
+  for (int index = 0; index < candidateCount; index++) {
+    String host = candidates[index];
+    WiFiClient wifiClient;
+    HttpClient http(wifiClient, host.c_str(), configuredServerPort);
+
+    http.beginRequest();
+    http.post(serverPath);
+    http.sendHeader("Content-Type", "application/json");
+    http.sendHeader("Content-Length", payload.length());
+    http.beginBody();
+    http.print(payload);
+    http.endRequest();
+
+    int statusCode = http.responseStatusCode();
+    if (statusCode > 0) {
+      if (lastKnownServerHost != host) {
+        lastKnownServerHost = host;
+        prefs.putString("serverLast", lastKnownServerHost);
+      }
+      usedHost = host;
+      return statusCode;
+    }
+  }
+
+  usedHost = "";
+  return -1;
+}
+
+int sendPayloadOverGsmAuto(const String &payload, String &usedHost) {
+  String candidates[3];
+  int candidateCount = buildServerCandidates(candidates, 3);
+
+  for (int index = 0; index < candidateCount; index++) {
+    String host = candidates[index];
+    TinyGsmClient gsmClient(modem);
+    HttpClient http(gsmClient, host.c_str(), configuredServerPort);
+
+    http.beginRequest();
+    http.post(serverPath);
+    http.sendHeader("Content-Type", "application/json");
+    http.sendHeader("Content-Length", payload.length());
+    http.beginBody();
+    http.print(payload);
+    http.endRequest();
+
+    int statusCode = http.responseStatusCode();
+    http.stop();
+    if (statusCode > 0) {
+      if (lastKnownServerHost != host) {
+        lastKnownServerHost = host;
+        prefs.putString("serverLast", lastKnownServerHost);
+      }
+      usedHost = host;
+      return statusCode;
+    }
+  }
+
+  usedHost = "";
+  return -1;
+}
+
+String getActiveServerHost() {
+  if (useGatewayServer && WiFi.status() == WL_CONNECTED) {
+    IPAddress gateway = WiFi.gatewayIP();
+    if (!(gateway[0] == 0 && gateway[1] == 0 && gateway[2] == 0 &&
+          gateway[3] == 0)) {
+      return gateway.toString();
+    }
+  }
+
+  return configuredServerHost;
+}
+
+void printRuntimeConfigHelp() {
+  Serial.println("[CFG] Commands:");
+  Serial.println("[CFG] SHOW");
+  Serial.println("[CFG] MODE GATEWAY");
+  Serial.println("[CFG] MODE MANUAL");
+  Serial.println("[CFG] HOST <ip-or-host>");
+  Serial.println("[CFG] PORT <1-65535>");
+  Serial.println("[CFG] WIFI <ssid>|<password>");
+  Serial.println("[CFG] HELP");
+}
+
+void printRuntimeConfigStatus() {
+  Serial.println("[CFG] --- Tracker Config ---");
+  Serial.println("[CFG] WiFi SSID: " + wifiSsid);
+  Serial.println("[CFG] Server mode: " +
+                 String(useGatewayServer ? "GATEWAY" : "MANUAL"));
+  Serial.println("[CFG] Manual host: " + configuredServerHost);
+  Serial.println("[CFG] Last good host: " +
+                 String(lastKnownServerHost == "" ? "(none)"
+                                                  : lastKnownServerHost));
+  Serial.println("[CFG] Active host: " + getActiveServerHost());
+  Serial.println("[CFG] Port: " + String(configuredServerPort));
+}
+
+void processRuntimeSerialCommands() {
+  if (!Serial.available()) {
+    return;
+  }
+
+  String raw = Serial.readStringUntil('\n');
+  raw.trim();
+  if (raw == "") {
+    return;
+  }
+
+  String command = raw;
+  command.toUpperCase();
+
+  if (command == "HELP") {
+    printRuntimeConfigHelp();
+    return;
+  }
+
+  if (command == "SHOW") {
+    printRuntimeConfigStatus();
+    return;
+  }
+
+  if (command == "MODE GATEWAY") {
+    useGatewayServer = true;
+    saveRuntimeConfig();
+    Serial.println("[CFG] Mode set to GATEWAY.");
+    printRuntimeConfigStatus();
+    return;
+  }
+
+  if (command == "MODE MANUAL") {
+    useGatewayServer = false;
+    saveRuntimeConfig();
+    Serial.println("[CFG] Mode set to MANUAL.");
+    printRuntimeConfigStatus();
+    return;
+  }
+
+  if (command.startsWith("HOST ")) {
+    String hostValue = raw.substring(5);
+    hostValue.trim();
+    if (hostValue == "") {
+      Serial.println("[CFG] Host cannot be empty.");
+      return;
+    }
+
+    configuredServerHost = hostValue;
+    useGatewayServer = false;
+    saveRuntimeConfig();
+    Serial.println("[CFG] Manual host updated.");
+    printRuntimeConfigStatus();
+    return;
+  }
+
+  if (command.startsWith("PORT ")) {
+    String portValue = raw.substring(5);
+    portValue.trim();
+    int parsedPort = portValue.toInt();
+    if (parsedPort <= 0 || parsedPort > 65535) {
+      Serial.println("[CFG] Invalid port. Use 1-65535.");
+      return;
+    }
+
+    configuredServerPort = parsedPort;
+    saveRuntimeConfig();
+    Serial.println("[CFG] Port updated.");
+    printRuntimeConfigStatus();
+    return;
+  }
+
+  if (command.startsWith("WIFI ")) {
+    String wifiPayload = raw.substring(5);
+    int splitIndex = wifiPayload.indexOf('|');
+    if (splitIndex <= 0 || splitIndex >= wifiPayload.length() - 1) {
+      Serial.println("[CFG] Use WIFI <ssid>|<password>");
+      return;
+    }
+
+    String newSsid = wifiPayload.substring(0, splitIndex);
+    String newPassword = wifiPayload.substring(splitIndex + 1);
+    newSsid.trim();
+    newPassword.trim();
+
+    if (newSsid == "") {
+      Serial.println("[CFG] SSID cannot be empty.");
+      return;
+    }
+
+    wifiSsid = newSsid;
+    wifiPassword = newPassword;
+    saveRuntimeConfig();
+    Serial.println("[CFG] WiFi credentials updated. Reconnecting...");
+    WiFi.disconnect();
+    delay(200);
+    connectToWifiStation();
+    return;
+  }
+
+  Serial.println("[CFG] Unknown command. Type HELP.");
+}
 
 void connectToWifiStation() {
   lastWifiRetryTime = millis();
@@ -54,7 +327,7 @@ void connectToWifiStation() {
   WiFi.setAutoReconnect(true);
   WiFi.disconnect();
   delay(200);
-  WiFi.begin(ssid, password);
+  WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
   Serial.print("Connecting to Wi-Fi");
 
   int attempts = 0;
@@ -99,6 +372,8 @@ void logGpsReject(const String &message) {
 
 void setup() {
   Serial.begin(115200);
+  prefs.begin("gpscfg", false);
+  loadRuntimeConfig();
 
   // Initialize GPS
   gpsSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
@@ -109,11 +384,15 @@ void setup() {
   Serial.println("\n==================================");
   Serial.println("DUAL-MODE GPS TRACKER STARTED");
   Serial.println("==================================");
+  printRuntimeConfigStatus();
+  printRuntimeConfigHelp();
 
   connectToWifiStation();
 }
 
 void loop() {
+  processRuntimeSerialCommands();
+
   // 1. Process GPS Data Continuously
   uint16_t bytesReadThisLoop = 0;
   while (gpsSerial.available() > 0) {
@@ -219,19 +498,10 @@ void loop() {
       // Attempt Wi-Fi First
       if (WiFi.status() == WL_CONNECTED) {
         Serial.println("[Wi-Fi] Sending data over Wi-Fi...");
-        WiFiClient wifiClient;
-        HttpClient http(wifiClient, serverHost, serverPort);
-
-        http.beginRequest();
-        http.post(serverPath);
-        http.sendHeader("Content-Type", "application/json");
-        http.sendHeader("Content-Length", payload.length());
-        http.beginBody();
-        http.print(payload);
-        http.endRequest();
-
-        int statusCode = http.responseStatusCode();
-        Serial.printf("[Wi-Fi] Response Code: %d\n", statusCode);
+        String usedHost;
+        int statusCode = sendPayloadOverWiFiAuto(payload, usedHost);
+        Serial.printf("[Wi-Fi] Response Code: %d (host=%s)\n", statusCode,
+                      usedHost.c_str());
       }
       // Fallback to Cellular GPRS
       else {
@@ -262,20 +532,10 @@ void loop() {
         }
 
         Serial.println("[GSM] GPRS Connected. Sending data...");
-        TinyGsmClient gsmClient(modem);
-        HttpClient http(gsmClient, serverHost, serverPort);
-
-        http.beginRequest();
-        http.post(serverPath);
-        http.sendHeader("Content-Type", "application/json");
-        http.sendHeader("Content-Length", payload.length());
-        http.beginBody();
-        http.print(payload);
-        http.endRequest();
-
-        int statusCode = http.responseStatusCode();
-        Serial.printf("[GSM] Response Code: %d\n", statusCode);
-        http.stop();
+        String usedHost;
+        int statusCode = sendPayloadOverGsmAuto(payload, usedHost);
+        Serial.printf("[GSM] Response Code: %d (host=%s)\n", statusCode,
+                      usedHost.c_str());
       }
 
     } else {

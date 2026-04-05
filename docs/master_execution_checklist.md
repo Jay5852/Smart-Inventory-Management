@@ -63,3 +63,80 @@ The project is at a **late integration / pre-release stage**:
   - Confirm the serial log no longer treats `HDOP 99.99` as a hard error.
   - Verify live location, distance-from-zone, accuracy, speed, and heading update in the dashboard.
 - Move the tracker outside the configured work zone and confirm the geofence alert banner appears.
+
+## 7) Friend-Side Hotspot Bootstrap (Recommended First-Time Setup)
+- Use this when the system is moved to a new place and normal Wi-Fi is not stable yet.
+- Keep one network path for everything to avoid IP mismatch.
+
+### Network Topology
+1. Friend phone hotspot ON (internet source).
+2. Friend laptop connected to phone hotspot.
+3. Friend laptop Mobile Hotspot ON.
+4. Both ESP32 boards connect to laptop hotspot SSID/password.
+
+### Get Correct Server IP from Laptop
+Run on friend laptop:
+
+```powershell
+ipconfig
+```
+
+- Find IPv4 under hotspot adapter (`Local Area Connection*` / `Microsoft Wi-Fi Direct Virtual Adapter`).
+- Typical value is `192.168.137.1`.
+- Use this IPv4 as backend server IP for both ESP32 firmwares and dashboard config.
+
+### First Boot Procedure
+1. Start backend on friend laptop (`server/`):
+
+```powershell
+npm run start
+```
+
+2. Open dashboard and go to `Network Settings`.
+3. Remove old Wi-Fi profiles from previous location.
+4. Save only friend laptop hotspot SSID/password profile.
+5. On reader menu: `WiFi Connect` → `Fetch Dashboard WiFi` → select friend hotspot.
+6. Reboot both ESP32 boards and confirm reconnect to the same hotspot.
+
+### Quick Pass Criteria
+- Reader shows Wi-Fi connected icon consistently after reboot.
+- RFID scan flow updates inventory/transactions in dashboard.
+- Tracker location updates live without routing to old network.
+- No unexpected reconnect attempts to previous AP names.
+
+## 8) No-Reflash Endpoint Switching (Home ↔ College)
+- The firmware now supports **automatic endpoint selection** and persistent storage.
+- On each request, devices try: `last good host` → `gateway host` (if enabled) → `manual host`.
+- This means location changes normally work without manual serial/menu updates.
+
+### Reader (RFID Station) Runtime Config
+- On device: `Main Menu` → `Server Config` → `Toggle Mode`.
+- Keep mode in `GATEWAY` for portable auto behavior.
+- USB serial commands are optional overrides only:
+  - `SHOW`
+  - `MODE GATEWAY`
+  - `MODE MANUAL`
+  - `HOST <ip-or-host>`
+  - `PORT <1-65535>`
+  - `HELP`
+
+### Tracker Runtime Config (USB Serial)
+- Connect tracker over USB and open serial monitor (`115200`).
+- Available optional override commands:
+  - `SHOW`
+  - `MODE GATEWAY`
+  - `MODE MANUAL`
+  - `HOST <ip-or-host>`
+  - `PORT <1-65535>`
+  - `WIFI <ssid>|<password>`
+  - `HELP`
+
+### Recommended Portable Workflow
+1. Enable laptop hotspot and connect both ESP32 devices.
+2. Keep both devices in `MODE GATEWAY` (default recommended).
+3. Start backend on laptop.
+4. Verify connectivity with one RFID transaction and one GPS update.
+5. No manual `HOST/PORT` step is needed during normal place changes.
+
+### When to Use Manual Mode
+- Use `MODE MANUAL` only if backend is not reachable through auto fallback (for example, fixed lab server IP or public DNS host).

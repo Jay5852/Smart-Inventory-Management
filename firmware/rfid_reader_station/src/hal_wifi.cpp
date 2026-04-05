@@ -95,7 +95,7 @@ bool connectToSavedWifi(const WifiProfile profiles[], uint8_t count) {
     }
 
     Serial.println("Trying WiFi: " + profiles[i].ssid);
-    WiFi.disconnect(true);
+    WiFi.disconnect(true, true);
     delay(200);
     WiFi.begin(profiles[i].ssid.c_str(), profiles[i].password.c_str());
 

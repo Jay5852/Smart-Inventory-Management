@@ -144,7 +144,7 @@
                         sessionStorage.setItem('synctrack_username', data.username || u);
                         sessionStorage.setItem('synctrack_display_name', data.displayName || data.username || u);
                     }
-                    window.location.href = '/';
+                    window.location.href = '/dashboard';
                 } else {
                     showToast('Invalid credentials', 'alert');
                 }

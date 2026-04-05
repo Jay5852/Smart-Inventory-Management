@@ -122,7 +122,15 @@ function auditFromRequest(req, event) {
     });
 }
 
-// Serve the dashboard statically
+// Serve home landing first, then static assets and dashboard pages
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dashboard/home.html'));
+});
+
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, '../dashboard/index.html'));
+});
+
 app.use(express.static(path.join(__dirname, '../dashboard')));
 
 // ==========================================

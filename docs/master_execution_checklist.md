@@ -140,3 +140,38 @@ npm run start
 
 ### When to Use Manual Mode
 - Use `MODE MANUAL` only if backend is not reachable through auto fallback (for example, fixed lab server IP or public DNS host).
+
+## 9) Role Authority Matrix (Who does what)
+
+Use these default responsibilities so the team knows exactly who controls which feature.
+
+- **Admin**
+  - Full access to all tabs and actions.
+  - Can review audit logs and supervise manager/operator activities.
+  - Can configure geofence and network settings.
+
+- **Manager**
+  - Operational owner for day-to-day system setup.
+  - Can add/remove employees and components.
+  - Can set/update geofence center and radius.
+  - Can update Wi-Fi profiles for ESP32 devices.
+  - Can access device health and asset reports.
+
+- **Operator**
+  - Gate operation and live monitoring only.
+  - Can run scans and monitor inventory/tracking updates.
+  - Cannot change geofence, Wi-Fi profiles, or master records.
+
+### Geofence Ownership (recommended)
+- Assign **one Manager** as primary geofence owner.
+- Keep **one Admin** as backup approver.
+- Operators should only monitor alerts and escalate if the zone needs update.
+
+### Where to set geofence in UI
+1. Login as **manager** or **admin**.
+2. Open **Live Tracking** tab.
+3. In **Geofence Settings**:
+   - Search location or use `Select on Map`.
+   - Set `Latitude`, `Longitude`, and `Radius`.
+   - Click `Update Work Zone`.
+4. Verify the new circle appears on map and alert banner behavior is correct.

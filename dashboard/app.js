@@ -14,6 +14,7 @@ let liveFollowEnabled = true;
 let historyPolyline = null;
 let playbackInterval = null;
 let geofenceViolationActive = false;
+let liveFollowPauseToastAt = 0;
 const baseUrl = window.location.host === "" ? "http://localhost:3000" : "";
 let authToken = sessionStorage.getItem('synctrack_token') || '';
 let authRole = sessionStorage.getItem('synctrack_role') || 'operator';
@@ -73,6 +74,7 @@ function createMapLayer(mode = 'street') {
 }
 
 function setLiveFollow(enabled, userInitiated = false) {
+    const wasEnabled = liveFollowEnabled;
     liveFollowEnabled = enabled;
     const followBtn = document.getElementById('btn-live-follow');
     if (followBtn) {
@@ -86,8 +88,12 @@ function setLiveFollow(enabled, userInitiated = false) {
         mapModeBadge.innerText = `${getLiveMapModeLabel()}${enabled ? ' · Auto-follow' : ' · Manual pan'}`;
     }
 
-    if (userInitiated && !enabled) {
-        showToast('Live follow paused. Use Follow Live to re-center.', 'info');
+    if (userInitiated && !enabled && wasEnabled) {
+        const now = Date.now();
+        if (now - liveFollowPauseToastAt > 4000) {
+            liveFollowPauseToastAt = now;
+            showToast('Live follow paused. Use Follow Live to re-center.', 'info');
+        }
     }
 }
 
@@ -999,8 +1005,8 @@ async function addComponent() {
         return;
     }
 
-    const name = document.getElementById('add-comp-name').value;
-    const uid = document.getElementById('add-comp-uid').value;
+    const name = document.getElementById('add-comp-name').value.trim();
+    const uid = document.getElementById('add-comp-uid').value.trim().toUpperCase();
     const tracker = document.getElementById('add-comp-tracker').value;
 
     if (!name || !uid) { showToast('Name and UID are required!', 'alert'); return; }
@@ -1011,6 +1017,13 @@ async function addComponent() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ uid, name, tracker_id: tracker })
         });
+        const text = await res.text();
+        let data = {};
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (parseError) {
+            data = { error: text || 'Failed to register component' };
+        }
         if (res.ok) {
             showToast('Component Registered!', 'info');
             document.getElementById('add-comp-name').value = '';
@@ -1018,7 +1031,7 @@ async function addComponent() {
             document.getElementById('add-comp-tracker').value = '';
             fetchInventory();
         } else {
-            showToast('Failed to register component', 'alert');
+            showToast(data.error || 'Failed to register component', 'alert');
         }
     } catch (e) { console.error(e); }
 }
@@ -1074,8 +1087,8 @@ async function addEmployee() {
         return;
     }
 
-    const name = document.getElementById('add-emp-name').value;
-    const uid = document.getElementById('add-emp-uid').value;
+    const name = document.getElementById('add-emp-name').value.trim();
+    const uid = document.getElementById('add-emp-uid').value.trim().toUpperCase();
 
     if (!name || !uid) { showToast('Name and UID are required!', 'alert'); return; }
 
@@ -1085,6 +1098,13 @@ async function addEmployee() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ uid, name })
         });
+        const text = await res.text();
+        let data = {};
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (parseError) {
+            data = { error: text || 'Failed to register employee' };
+        }
         if (res.ok) {
             showToast('Employee Registered!', 'info');
             document.getElementById('add-emp-name').value = '';
@@ -1092,7 +1112,7 @@ async function addEmployee() {
             fetchStaff();
             fetchEmployeesForFilter(); // Update dropdowns
         } else {
-            showToast('Failed to register employee', 'alert');
+            showToast(data.error || 'Failed to register employee', 'alert');
         }
     } catch (e) { console.error(e); }
 }

@@ -376,11 +376,18 @@
                 </div>
                 <div class="geofence-controls">
                     <div class="control-group full-width-group" style="width: 100%; margin-bottom: 12px;">
+                        <label>Authority</label>
+                        <div style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6;">
+                            <strong>Manager/Admin</strong> can update work zone.<br>
+                            <strong>Operator</strong> can view live tracking and alerts only.
+                        </div>
+                    </div>
+                    <div class="control-group full-width-group" style="width: 100%; margin-bottom: 12px;">
                         <label>Search Location</label>
                         <div style="display: flex; gap: 8px;">
                             <input type="text" id="geo-search" placeholder="e.g. Pune Station, Hinjawadi"
                                 style="flex: 1;">
-                            <button class="btn-secondary" onclick="searchLocation()">🔍 Search</button>
+                            <button class="btn-secondary" data-role-min="manager" onclick="searchLocation()">🔍 Search</button>
                         </div>
                     </div>
                     <div class="control-group">
@@ -395,9 +402,9 @@
                         <label>Radius (meters)</label>
                         <input type="number" id="geo-radius" value="500" min="50" max="5000">
                     </div>
-                    <button class="btn-secondary" id="btn-select-map" onclick="toggleMapSelection()">📍 Select on
+                    <button class="btn-secondary" data-role-min="manager" id="btn-select-map" onclick="toggleMapSelection()">📍 Select on
                         Map</button>
-                    <button class="btn-primary" onclick="updateGeofence()">Update Work Zone</button>
+                    <button class="btn-primary" data-role-min="manager" onclick="updateGeofence()">Update Work Zone</button>
                 </div>
             </div>
         </div>
@@ -571,7 +578,7 @@
                         <input type="text" id="add-comp-tracker" placeholder="e.g. TRACK-001"
                             style="width:100%; padding:10px; background:var(--bg-dark); border:1px solid var(--border); color:white; border-radius:6px;">
                     </div>
-                    <button class="btn-primary" data-role-min="operator" onclick="addComponent()"
+                    <button class="btn-primary" data-role-min="manager" onclick="addComponent()"
                         style="padding:10px 20px; height:41px;">Save
                         Component</button>
                 </div>
@@ -688,7 +695,7 @@
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
                     <button class="btn-secondary" data-role-min="manager" onclick="addWifiProfileRow()"
                         style="padding:10px 16px;">+ Add Another Network</button>
-                    <button class="btn-primary" data-role-min="operator" onclick="saveWifiConfig()"
+                    <button class="btn-primary" data-role-min="manager" onclick="saveWifiConfig()"
                         style="padding:10px 20px;">Save & Push to Devices</button>
                 </div>
             </div>
